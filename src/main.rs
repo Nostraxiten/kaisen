@@ -5,6 +5,7 @@
 mod cli;
 mod dns;
 mod mail;
+mod neigh;
 mod osfp;
 mod output;
 mod ports;
@@ -56,8 +57,31 @@ async fn main() -> ExitCode {
         Mode::Mail => run_mail(&opts).await,
         Mode::Lookup => run_lookup(&opts).await,
         Mode::Whois => run_whois(&opts).await,
+        Mode::Neighbor => run_neighbor(&opts).await,
         Mode::Scan => run_scan(&opts).await,
     }
+}
+
+async fn run_neighbor(opts: &Options) -> ExitCode {
+    let p = Painter::new(opts.color);
+    if opts.targets.is_empty() {
+        eprintln!("kaisen: no domain for neighbor recon");
+        eprintln!("Try 'kaisen neighbor <domain>'.");
+        return ExitCode::from(2);
+    }
+    let server = match resolve_dns_server(opts).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{}", p.red(&format!("kaisen: {e}")));
+            return ExitCode::FAILURE;
+        }
+    };
+    let timeout_ms = opts.timing.connect_timeout_ms.max(2000);
+    let conc = opts.timing.concurrency;
+    for domain in &opts.targets {
+        neigh::run(domain, server, timeout_ms, opts.color, conc).await;
+    }
+    ExitCode::SUCCESS
 }
 
 async fn run_whois(opts: &Options) -> ExitCode {

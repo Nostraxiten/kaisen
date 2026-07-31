@@ -17,6 +17,7 @@ pub enum Mode {
     Mail,
     Lookup,
     Whois,
+    Neighbor,
     Help,
     Version,
 }
@@ -180,6 +181,10 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                 o.mode = Mode::Whois;
                 i = 1;
             }
+            "neighbor" | "neighbour" | "neig" | "fierce" | "recon" => {
+                o.mode = Mode::Neighbor;
+                i = 1;
+            }
             "scan" => {
                 o.mode = Mode::Scan;
                 i = 1;
@@ -302,6 +307,7 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             "-M" | "--mail" | "--mail-audit" => o.mode = Mode::Mail,
             "-w" | "--whois" => o.mode = Mode::Whois,
             "-L" | "--lookup" => o.mode = Mode::Lookup,
+            "-N" | "--neighbor" | "--neighbour" | "--neig" => o.mode = Mode::Neighbor,
             "+short" | "--short" => o.dns_short = true,
             "+tcp" | "--dns-tcp" => o.dns_tcp = true,
             "+ttl" | "--ttl" => o.dns_trace_ttl = true,
@@ -441,6 +447,8 @@ USAGE:
     -L, --lookup           Same as the `lookup` subcommand
     whois                  WHOIS for a domain or IP (from-scratch, TCP/43)
     -w, --whois            Same as the `whois` subcommand (use -v for raw record)
+    neighbor, neig, fierce Subdomain + neighbourhood recon (fierce-style)
+    -N, --neighbor         Same as the `neighbor` subcommand
 
 EXAMPLES:
     kaisen mail google.com
@@ -448,6 +456,8 @@ EXAMPLES:
     kaisen lookup github.com
     kaisen whois google.com
     kaisen whois 8.8.8.8 -v
+    kaisen neighbor example.com
+    kaisen neig example.com @1.1.1.1
     kaisen -OS 192.168.1.2                 # just the OS + host info (focused)
     kaison -OS -sV -Pn -T4 -vvv -PA -vuln 192.168.1.2
     kaisen -PF -sV 10.0.0.5

@@ -162,6 +162,16 @@ referral for domains, and follows the RIR referral (ARIN→RIPE/APNIC/…) for I
 with a built-in TLD-server fallback. It prints a summary (registrar, dates,
 name servers, status / net-range, org, abuse contact) plus the raw record.
 
+### Neighbor recon (fierce-style)
+| Command | Meaning |
+|---------|---------|
+| `kaisen neighbor <domain>` | Subdomain brute-force + neighbourhood reverse DNS |
+| `neig` / `fierce` / `-N` | Aliases for the same |
+
+`kaisen neighbor <domain>` resolves the apex, detects wildcard DNS, brute-forces
+a built-in list of ~190 common subdomains, then walks the reverse DNS of the
+/24s around the discovered IPs to surface "neighbour" hosts. Purely passive DNS.
+
 ### Mail (email posture audit)
 | Flag | Meaning |
 |------|---------|
