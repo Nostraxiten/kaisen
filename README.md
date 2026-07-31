@@ -1,7 +1,5 @@
 # Kaisen
 
-**A fast `nmap` + `dig` hybrid network scanner — written in Rust, works without root.**
-
 Kaisen is a single self-contained binary you install once and run from anywhere
 (`kaisen`, `kai`, or `kaison`). It combines high-speed **port scanning**,
 **service/version detection**, **best-effort OS inference**, a lightweight
