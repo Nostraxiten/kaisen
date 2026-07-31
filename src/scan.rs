@@ -256,7 +256,7 @@ pub fn print_report(report: &HostReport, opts: &Options) {
     match opts.output {
         OutputFormat::Normal => print_normal(report, opts),
         OutputFormat::Grepable => print_grepable(report),
-        OutputFormat::Json => print_json(report), // printed per-host; wrapper handled by caller
+        OutputFormat::Json => print_json(report, opts), // printed per-host; wrapper handled by caller
     }
 }
 
@@ -616,10 +616,11 @@ fn print_grepable(report: &HostReport) {
     );
 }
 
-fn print_json(report: &HostReport) {
+fn print_json(report: &HostReport, opts: &Options) {
     let mut ports_json = Vec::new();
     for r in &report.ports {
-        if r.state == State::Closed {
+        // Closed ports are never emitted; with --open, only open ports are.
+        if r.state == State::Closed || (opts.only_open && r.state != State::Open) {
             continue;
         }
         let svc = r.service.as_ref();
