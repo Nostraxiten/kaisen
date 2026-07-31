@@ -369,31 +369,46 @@ pub async fn query(
         };
         let sock = UdpSocket::bind(bind).await.map_err(|e| e.to_string())?;
         sock.connect(server).await.map_err(|e| e.to_string())?;
-        sock.send(&packet).await.map_err(|e| e.to_string())?;
 
+        // UDP is lossy — especially over mobile links and against rate-limited
+        // public resolvers under bursts. Retransmit up to 3 times on timeout
+        // before giving up on UDP (a per-attempt window keeps latency bounded).
+        let per_try = Duration::from_millis((dur.as_millis() as u64 / 2).max(700));
         let mut buf = vec![0u8; 4096];
-        match timeout(dur, sock.recv(&mut buf)).await {
-            Ok(Ok(n)) => {
-                let msg = &buf[..n];
-                // Check TC (truncation) bit.
-                let tc = n >= 4 && (msg[2] & 0x02) != 0;
-                if !tc {
-                    let (rcode, answers, authorities, additionals) = parse_response(msg)?;
-                    return Ok(Response {
-                        rcode,
-                        answers,
-                        authorities,
-                        additionals,
-                        elapsed_ms: start.elapsed().as_millis(),
-                        server,
-                        via_tcp: false,
-                    });
-                }
-                // else fall through to TCP
+        let mut received: Option<usize> = None;
+        for _ in 0..3 {
+            if sock.send(&packet).await.is_err() {
+                break;
             }
-            Ok(Err(e)) => return Err(e.to_string()),
-            Err(_) => return Err("query timed out (UDP)".into()),
+            match timeout(per_try, sock.recv(&mut buf)).await {
+                Ok(Ok(n)) => {
+                    received = Some(n);
+                    break;
+                }
+                Ok(Err(e)) => return Err(e.to_string()),
+                Err(_) => continue, // timed out — retransmit
+            }
         }
+
+        if let Some(n) = received {
+            let msg = &buf[..n];
+            // Check TC (truncation) bit.
+            let tc = n >= 4 && (msg[2] & 0x02) != 0;
+            if !tc {
+                let (rcode, answers, authorities, additionals) = parse_response(msg)?;
+                return Ok(Response {
+                    rcode,
+                    answers,
+                    authorities,
+                    additionals,
+                    elapsed_ms: start.elapsed().as_millis(),
+                    server,
+                    via_tcp: false,
+                });
+            }
+            // truncated -> fall through to TCP
+        }
+        // If every UDP attempt timed out, fall through to a TCP retry below.
     }
 
     // TCP path (length-prefixed).

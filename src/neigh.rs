@@ -74,7 +74,9 @@ pub async fn run(
 ) {
     let p = Painter::new(color);
     let domain = domain.trim_end_matches('.');
-    let conc = concurrency.clamp(1, 200);
+    // Keep DNS recon gentle: bursting hundreds of concurrent UDP queries at a
+    // public resolver invites rate-limiting and packet loss (false negatives).
+    let conc = concurrency.clamp(1, 32);
 
     println!();
     println!(
