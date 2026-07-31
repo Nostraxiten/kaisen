@@ -71,6 +71,7 @@ pub struct Options {
     pub scan_kind: ScanKind,
     pub ports: Vec<u16>,
     pub ports_explicit: bool,
+    pub ports_selected: bool,
     pub service_detection: bool,
     pub os_detection: bool,
     pub vuln: bool,
@@ -108,6 +109,7 @@ impl Default for Options {
             scan_kind: ScanKind::Connect,
             ports: Vec::new(),
             ports_explicit: false,
+            ports_selected: false,
             service_detection: false,
             os_detection: false,
             vuln: false,
@@ -147,7 +149,10 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
     let mut ov_timeout: Option<u64> = None;
     let mut ov_retries: Option<u32> = None;
 
-    // color default: honor NO_COLOR env
+    // color default: on only when stdout is a real terminal, so redirecting to
+    // a file (`kaisen ... > out.txt`) yields clean, ANSI-free text. NO_COLOR and
+    // explicit --color/--no-color flags override this below.
+    o.color = std::io::IsTerminal::is_terminal(&std::io::stdout());
     if std::env::var_os("NO_COLOR").is_some() {
         o.color = false;
     }
@@ -190,20 +195,31 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             "-sS" | "--syn" => o.scan_kind = ScanKind::Syn,
 
             // ---- port selection ----
-            "-PF" | "--port-famous" => want_top = Some(1000),
-            "-PA" | "--ports-all" | "-p-" => want_all = true,
+            "-PF" | "--port-famous" => {
+                want_top = Some(1000);
+                o.ports_selected = true;
+            }
+            "-PA" | "--ports-all" | "-p-" => {
+                want_all = true;
+                o.ports_selected = true;
+            }
             "--top-ports" => {
                 i += 1;
                 let v = args.get(i).ok_or("--top-ports requires a number")?;
                 want_top = Some(v.parse().map_err(|_| "invalid --top-ports value")?);
+                o.ports_selected = true;
             }
             "-p" | "--ports" => {
                 i += 1;
                 let v = args.get(i).ok_or("-p requires a port spec")?;
                 o.ports = ports::parse_ports(v)?;
                 o.ports_explicit = true;
+                o.ports_selected = true;
             }
-            "-F" | "--fast" => want_top = Some(100),
+            "-F" | "--fast" => {
+                want_top = Some(100);
+                o.ports_selected = true;
+            }
 
             // ---- detection ----
             "-sV" | "--service-version" | "-SV" => o.service_detection = true,
@@ -350,7 +366,10 @@ USAGE:
 
   ── DETECTION ──────────────────────────────────────────────────────────────
     -sV, --service-version Probe open ports to detect service & version (banner)
-    -OS, --os-detection    Best-effort OS inference (heuristic, no root)
+    -OS, --os-detection    Detect the OS. Used ALONE it is a focused action:
+                           probes high-signal ports and reports OS + host role
+                           (no port table). Combined with a scan it adds an
+                           'OS guess' line. Heuristic, works without root.
     -vuln, --vuln          Match detected services against known-vuln signatures
     -A,  --aggressive      Enable -sV, -OS and -vuln together
 
@@ -385,12 +404,18 @@ USAGE:
     -V, --version          Show version
 
 EXAMPLES:
+    kaisen -OS 192.168.1.2                 # just the OS + host info (focused)
     kaison -OS -sV -Pn -T4 -vvv -PA -vuln 192.168.1.2
     kaisen -PF -sV 10.0.0.5
     kaisen -HS -p 1-65535 --open scanme.example.com
+    kaisen -sV 10.0.0.5 > scan.txt          # redirect: colours auto-off in files
     kaisen dns MX example.com @8.8.8.8
     kaisen -D ANY example.com +short
     kaisen -x 1.1.1.1
+
+TIP: All results go to stdout, so you can redirect or append with > and >>
+     (e.g. 'kaisen -sV host >> report.txt'). Colours turn off automatically
+     when the output is not a terminal, so files stay clean.
 
 Kaisen defaults to unprivileged, root-free scanning. SYN/ICMP features degrade
 gracefully when raw-socket privileges are unavailable (e.g. unrooted Termux).

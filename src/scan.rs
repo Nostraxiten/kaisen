@@ -258,6 +258,170 @@ pub fn print_report(report: &HostReport, opts: &Options) {
     }
 }
 
+/// Aggregate an OS guess from banner hints and, failing that, from which ports
+/// are open. Returns (os_family, confidence, role_summary).
+fn infer_os(report: &HostReport) -> (String, &'static str, String) {
+    // 1) Banner-based hints (strongest signal).
+    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for r in &report.ports {
+        if r.state == State::Open {
+            if let Some(svc) = &r.service {
+                if !svc.os_hint.is_empty() {
+                    *counts.entry(svc.os_hint.clone()).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    let open_ports: Vec<u16> = report
+        .ports
+        .iter()
+        .filter(|r| r.state == State::Open)
+        .map(|r| r.port)
+        .collect();
+
+    // Human-friendly role summary from the open services.
+    let role = describe_role(&open_ports);
+
+    if let Some((hint, n)) = counts.iter().max_by_key(|(_, n)| **n) {
+        let conf = if *n >= 2 { "high" } else { "medium" };
+        return (hint.clone(), conf, role);
+    }
+
+    // 2) Port-based fallback (weaker).
+    let has = |p: u16| open_ports.contains(&p);
+    if has(3389) || has(445) || has(139) || has(135) {
+        return ("Windows (likely)".into(), "low", role);
+    }
+    if has(22) || has(111) || has(631) {
+        return ("Unix / Linux-like (likely)".into(), "low", role);
+    }
+    if open_ports.is_empty() {
+        return ("unknown".into(), "none", role);
+    }
+    ("unknown".into(), "low", role)
+}
+
+fn describe_role(ports: &[u16]) -> String {
+    let mut roles = Vec::new();
+    let any = |ps: &[u16]| ps.iter().any(|p| ports.contains(p));
+    if any(&[80, 443, 8080, 8443]) {
+        roles.push("web server");
+    }
+    if any(&[22]) {
+        roles.push("SSH host");
+    }
+    if any(&[3389]) {
+        roles.push("Windows RDP host");
+    }
+    if any(&[445, 139]) {
+        roles.push("SMB/file server");
+    }
+    if any(&[25, 465, 587]) {
+        roles.push("mail server");
+    }
+    if any(&[53]) {
+        roles.push("DNS server");
+    }
+    if any(&[3306, 5432, 6379, 27017]) {
+        roles.push("database host");
+    }
+    if any(&[21]) {
+        roles.push("FTP server");
+    }
+    if roles.is_empty() {
+        "general purpose host".to_string()
+    } else {
+        roles.join(", ")
+    }
+}
+
+/// Focused output for `kaisen -OS <target>`: report the operating system and a
+/// bit of context about the host, instead of the port table.
+pub fn print_os_report(report: &HostReport, opts: &Options) {
+    let p = Painter::new(opts.color);
+    println!();
+    println!(
+        "{} {} ({})",
+        p.bold("Kaisen OS detection for"),
+        p.cyan(&report.target),
+        report.ip
+    );
+    println!(
+        "Host is up. Probed {} port(s) in {:.2}s.",
+        report.ports.len(),
+        report.elapsed.as_secs_f64()
+    );
+    println!();
+
+    if report.open_count == 0 {
+        println!("{}", p.yellow("Could not determine the OS."));
+        println!(
+            "{}",
+            p.dim("No probed port responded, so there were no banners to analyse (host may be firewalled).")
+        );
+        println!(
+            "{}",
+            p.dim("Tip: run a wider scan first, e.g.  kaisen -sV -PF <target>")
+        );
+        return;
+    }
+
+    let (os, confidence, role) = infer_os(report);
+    let conf_c = match confidence {
+        "high" => p.green(confidence),
+        "medium" => p.yellow(confidence),
+        _ => p.dim(confidence),
+    };
+
+    println!("{:<14}{}", p.bold("OS:"), p.bold(&os));
+    println!("{:<14}{}", p.bold("Confidence:"), conf_c);
+    println!("{:<14}{}", p.bold("Role:"), role);
+
+    // Evidence: the banners the guess is based on.
+    let mut evidence = Vec::new();
+    for r in &report.ports {
+        if r.state == State::Open {
+            if let Some(svc) = &r.service {
+                let desc = svc.describe();
+                if !svc.os_hint.is_empty() || !desc.is_empty() {
+                    let line = format!(
+                        "{}/tcp {} {}",
+                        r.port,
+                        svc.name,
+                        if desc.is_empty() { svc.banner.clone() } else { desc }
+                    );
+                    let arrow = if svc.os_hint.is_empty() {
+                        String::new()
+                    } else {
+                        format!("  -> {}", svc.os_hint)
+                    };
+                    evidence.push(format!("{}{}", line.trim(), arrow));
+                }
+            }
+        }
+    }
+    if !evidence.is_empty() {
+        println!("{}", p.bold("Evidence:"));
+        for e in &evidence {
+            println!("  - {e}");
+        }
+    } else {
+        println!(
+            "{}",
+            p.dim("Evidence: none of the open ports exposed an OS-identifying banner.")
+        );
+    }
+
+    println!();
+    println!(
+        "{}",
+        p.dim(
+            "Note: running without root — OS is inferred from service banners, not a raw TCP/IP \
+             fingerprint. For deeper detection add -sV or run a full scan."
+        )
+    );
+}
+
 fn print_normal(report: &HostReport, opts: &Options) {
     let p = Painter::new(opts.color);
     println!();

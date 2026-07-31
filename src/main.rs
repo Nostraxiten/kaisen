@@ -54,7 +54,27 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn run_scan(opts: &Options) -> ExitCode {
+async fn run_scan(opts_in: &Options) -> ExitCode {
+    // Focused `-OS` mode: when the user asks only for OS detection (no explicit
+    // ports, no -sV/-vuln/--open, normal output), Kaisen probes a small,
+    // high-signal port set and reports the OS + host context instead of the
+    // full port table. Each flag should mean one clear thing.
+    let os_focus = opts_in.os_detection
+        && !opts_in.service_detection
+        && !opts_in.vuln
+        && !opts_in.only_open
+        && !opts_in.ports_selected
+        && opts_in.output == OutputFormat::Normal;
+
+    let mut owned;
+    let opts: &Options = if os_focus {
+        owned = opts_in.clone();
+        owned.ports = ports::os_probe_ports();
+        &owned
+    } else {
+        opts_in
+    };
+
     let p = Painter::new(opts.color);
 
     if opts.targets.is_empty() {
@@ -115,7 +135,11 @@ async fn run_scan(opts: &Options) -> ExitCode {
         if json && idx > 0 {
             println!(",");
         }
-        scan::print_report(&report, opts);
+        if os_focus {
+            scan::print_os_report(&report, opts);
+        } else {
+            scan::print_report(&report, opts);
+        }
         let _ = total;
     }
 
@@ -275,16 +299,11 @@ fn print_dns(qname: &str, qtype: &str, resp: &dns::Response, opts: &Options, p: 
     }
 }
 
-fn print_record(r: &dns::Record, opts: &Options, p: &Painter) {
-    let ttl = if opts.dns_trace_ttl {
-        format!("{:<7}", r.ttl)
-    } else {
-        format!("{:<7}", r.ttl)
-    };
+fn print_record(r: &dns::Record, _opts: &Options, p: &Painter) {
     println!(
-        "{:<28} {} IN  {:<7} {}",
+        "{:<28} {:<7} IN  {:<7} {}",
         p.cyan(&r.name),
-        ttl,
+        r.ttl,
         p.magenta(&dns::num_to_type(r.rtype)),
         r.data.render()
     );

@@ -104,7 +104,7 @@ kaisen -x 1.1.1.1            # reverse lookup
 | Flag | Alias | Meaning |
 |------|-------|---------|
 | `-sV` | `--service-version` | Probe open ports for service & version |
-| `-OS` | `--os-detection`, `-O` | Best-effort OS inference (heuristic, no root) |
+| `-OS` | `--os-detection`, `-O` | Detect OS. **Alone** = focused OS report (no port table); with a scan = adds an OS line. Heuristic, no root |
 | `-vuln` | `--vuln` | Match services against known-vuln signatures |
 | `-A` | `--aggressive` | Enable `-sV`, `-OS` and `-vuln` together |
 
@@ -165,6 +165,20 @@ kaisen -6 -p 80,443 ::1
 - **Normal** (default) — human-readable, coloured, nmap-style report.
 - **JSON** (`-oJ`) — machine-readable array of host objects; pipe into `jq`.
 - **Grepable** (`-oG`) — one line per host for quick `grep`/`awk`.
+
+### Saving output
+
+Everything prints to stdout, so redirect or append as usual:
+
+```sh
+kaisen -sV 10.0.0.5 > scan.txt        # overwrite
+kaisen -OS 10.0.0.5 >> report.txt     # append
+kaisen -PF -oJ 10.0.0.5 | jq .        # pipe JSON
+```
+
+Colours are turned off automatically when output isn't a terminal, so saved
+files contain clean text (no ANSI codes). Progress/banner lines go to stderr,
+so they don't pollute redirected results.
 
 ---
 

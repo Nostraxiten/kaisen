@@ -271,3 +271,15 @@ pub fn top_ports(n: usize) -> Vec<u16> {
 pub fn all_ports() -> Vec<u16> {
     (1u16..=65535).collect()
 }
+
+/// A small, high-signal set of ports whose banners tend to reveal the OS.
+/// Used by the focused `-OS` mode so it can infer the OS quickly without a
+/// full scan (SSH/HTTP/FTP/SMTP expose distro strings; SMB/RDP imply Windows).
+pub const OS_PROBE_PORTS: &[u16] = &[
+    21, 22, 23, 25, 53, 80, 110, 111, 135, 139, 143, 443, 445, 465, 587, 993, 995,
+    1723, 3306, 3389, 5432, 5900, 6379, 8080, 8443,
+];
+
+pub fn os_probe_ports() -> Vec<u16> {
+    OS_PROBE_PORTS.to_vec()
+}
