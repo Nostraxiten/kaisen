@@ -1,0 +1,26 @@
+[package]
+name = "kaisen"
+version = "0.1.0"
+edition = "2021"
+authors = ["Kaisen contributors"]
+description = "Kaisen — a fast nmap + dig hybrid network scanner that works without root"
+license = "MIT"
+repository = "https://github.com/nostraxiten/kaisen"
+readme = "README.md"
+keywords = ["nmap", "dig", "portscanner", "dns", "security"]
+categories = ["command-line-utilities", "network-programming"]
+
+[[bin]]
+name = "kaisen"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros", "io-util", "sync"] }
+futures = "0.3"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

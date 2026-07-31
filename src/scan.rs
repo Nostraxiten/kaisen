@@ -1,0 +1,443 @@
+//! Scan orchestration: target expansion (host / IP / CIDR), the unprivileged
+//! async TCP connect scanner, optional service/version/OS/vuln enrichment, and
+//! result rendering in normal / JSON / grepable formats.
+
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::time::{Duration, Instant};
+
+use futures::stream::{self, StreamExt};
+use tokio::net::TcpStream;
+use tokio::time::timeout;
+
+use crate::cli::{IpVersion, Options, OutputFormat, ScanKind};
+use crate::output::{json_escape, Painter};
+use crate::ports::service_name;
+use crate::service::{self, ServiceInfo};
+use crate::vuln::{self, Finding, Severity};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum State {
+    Open,
+    Closed,
+    Filtered,
+}
+
+impl State {
+    fn label(&self) -> &'static str {
+        match self {
+            State::Open => "open",
+            State::Closed => "closed",
+            State::Filtered => "filtered",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PortReport {
+    pub port: u16,
+    pub state: State,
+    pub service: Option<ServiceInfo>,
+    pub findings: Vec<Finding>,
+    pub reason: &'static str,
+}
+
+pub struct HostReport {
+    pub target: String,
+    pub ip: IpAddr,
+    pub ports: Vec<PortReport>,
+    pub os_guess: String,
+    pub elapsed: Duration,
+    pub open_count: usize,
+    pub closed_count: usize,
+    pub filtered_count: usize,
+}
+
+/// Expand a target string into concrete IPs. Supports hostname, IPv4/IPv6, and
+/// IPv4 CIDR notation.
+pub async fn expand_target(t: &str, ipv: IpVersion) -> Result<Vec<(String, IpAddr)>, String> {
+    // CIDR?
+    if let Some((base, prefix)) = t.split_once('/') {
+        if let Ok(ip) = base.parse::<Ipv4Addr>() {
+            let prefix: u32 = prefix.parse().map_err(|_| "invalid CIDR prefix")?;
+            if prefix > 32 {
+                return Err("CIDR prefix out of range".into());
+            }
+            let base_u = u32::from(ip);
+            let host_bits = 32 - prefix;
+            let count: u64 = 1u64 << host_bits;
+            if count > 65536 {
+                return Err("CIDR range too large (max /16)".into());
+            }
+            let mask = if host_bits == 32 { 0 } else { base_u & !((count as u32).wrapping_sub(1)) };
+            let net = if host_bits == 32 { 0 } else { mask };
+            let start = if host_bits == 32 { base_u } else { net };
+            let mut out = Vec::new();
+            for i in 0..count as u32 {
+                let addr = Ipv4Addr::from(start.wrapping_add(i));
+                out.push((addr.to_string(), IpAddr::V4(addr)));
+            }
+            return Ok(out);
+        }
+        return Err("only IPv4 CIDR is supported".into());
+    }
+
+    // Literal IP?
+    if let Ok(ip) = t.parse::<IpAddr>() {
+        if !ip_matches(ip, ipv) {
+            return Err("target IP version filtered by -4/-6".into());
+        }
+        return Ok(vec![(t.to_string(), ip)]);
+    }
+
+    // Hostname -> resolve.
+    let addrs: Vec<SocketAddr> = tokio::net::lookup_host((t, 0))
+        .await
+        .map_err(|e| format!("cannot resolve {t}: {e}"))?
+        .collect();
+    let mut out = Vec::new();
+    for sa in addrs {
+        let ip = sa.ip();
+        if ip_matches(ip, ipv) && !out.iter().any(|(_, existing)| *existing == ip) {
+            out.push((t.to_string(), ip));
+        }
+    }
+    if out.is_empty() {
+        return Err(format!("{t} resolved to no matching addresses"));
+    }
+    // For a hostname we typically scan a single primary address.
+    out.truncate(1);
+    Ok(out)
+}
+
+fn ip_matches(ip: IpAddr, ipv: IpVersion) -> bool {
+    match ipv {
+        IpVersion::Any => true,
+        IpVersion::V4 => ip.is_ipv4(),
+        IpVersion::V6 => ip.is_ipv6(),
+    }
+}
+
+async fn probe_port(ip: IpAddr, port: u16, timeout_ms: u64, retries: u32) -> (State, &'static str) {
+    let addr = SocketAddr::new(ip, port);
+    let dur = Duration::from_millis(timeout_ms);
+    let mut attempts = 0;
+    loop {
+        match timeout(dur, TcpStream::connect(addr)).await {
+            Ok(Ok(_stream)) => return (State::Open, "syn-ack"),
+            Ok(Err(e)) => {
+                use std::io::ErrorKind::*;
+                match e.kind() {
+                    ConnectionRefused => return (State::Closed, "conn-refused"),
+                    _ => {
+                        // Host unreachable / network down etc. -> filtered, but retry.
+                        if attempts >= retries {
+                            return (State::Filtered, "no-response");
+                        }
+                    }
+                }
+            }
+            Err(_) => {
+                if attempts >= retries {
+                    return (State::Filtered, "timeout");
+                }
+            }
+        }
+        attempts += 1;
+    }
+}
+
+/// Scan one host across the given ports.
+pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options) -> HostReport {
+    let start = Instant::now();
+    let ports = opts.ports.clone();
+    let timeout_ms = opts.timing.connect_timeout_ms;
+    let retries = opts.timing.retries;
+    let concurrency = opts.timing.concurrency.max(1);
+
+    // Phase 1: connectivity scan.
+    let results: Vec<(u16, State, &'static str)> = stream::iter(ports.into_iter())
+        .map(|port| async move {
+            let (state, reason) = probe_port(ip, port, timeout_ms, retries).await;
+            (port, state, reason)
+        })
+        .buffer_unordered(concurrency)
+        .collect()
+        .await;
+
+    let mut reports: Vec<PortReport> = results
+        .into_iter()
+        .map(|(port, state, reason)| PortReport {
+            port,
+            state,
+            service: None,
+            findings: Vec::new(),
+            reason,
+        })
+        .collect();
+    reports.sort_by_key(|r| r.port);
+
+    let open_count = reports.iter().filter(|r| r.state == State::Open).count();
+    let closed_count = reports.iter().filter(|r| r.state == State::Closed).count();
+    let filtered_count = reports.iter().filter(|r| r.state == State::Filtered).count();
+
+    // Phase 2: service/version detection on open ports (bounded concurrency).
+    if opts.service_detection || opts.vuln || opts.os_detection {
+        let open_ports: Vec<u16> = reports
+            .iter()
+            .filter(|r| r.state == State::Open)
+            .map(|r| r.port)
+            .collect();
+
+        let svc_conc = concurrency.min(200).max(1);
+        let detected: Vec<(u16, ServiceInfo)> = stream::iter(open_ports.into_iter())
+            .map(|port| {
+                let default = service_name(port).to_string();
+                async move {
+                    let addr = SocketAddr::new(ip, port);
+                    let info = service::detect(addr, &default, timeout_ms.max(1500)).await;
+                    (port, info)
+                }
+            })
+            .buffer_unordered(svc_conc)
+            .collect()
+            .await;
+
+        for (port, info) in detected {
+            if let Some(r) = reports.iter_mut().find(|r| r.port == port) {
+                if opts.vuln {
+                    r.findings = vuln::assess(port, &info);
+                }
+                r.service = Some(info);
+            }
+        }
+    }
+
+    // Phase 3: OS inference from collected banners.
+    let mut os_guess = String::new();
+    if opts.os_detection {
+        for r in &reports {
+            if let Some(svc) = &r.service {
+                if !svc.os_hint.is_empty() {
+                    os_guess = svc.os_hint.clone();
+                    break;
+                }
+            }
+        }
+        if os_guess.is_empty() {
+            os_guess = "unknown (no root: TCP/IP fingerprint unavailable; based on banners only)".into();
+        }
+    }
+
+    HostReport {
+        target: target.to_string(),
+        ip,
+        ports: reports,
+        os_guess,
+        elapsed: start.elapsed(),
+        open_count,
+        closed_count,
+        filtered_count,
+    }
+}
+
+fn sev_color(p: &Painter, sev: Severity, s: &str) -> String {
+    match sev {
+        Severity::Critical => p.bold(&p.red(s)),
+        Severity::High => p.red(s),
+        Severity::Medium => p.yellow(s),
+        Severity::Low => p.blue(s),
+        Severity::Info => p.dim(s),
+    }
+}
+
+pub fn print_report(report: &HostReport, opts: &Options) {
+    match opts.output {
+        OutputFormat::Normal => print_normal(report, opts),
+        OutputFormat::Grepable => print_grepable(report),
+        OutputFormat::Json => print_json(report), // printed per-host; wrapper handled by caller
+    }
+}
+
+fn print_normal(report: &HostReport, opts: &Options) {
+    let p = Painter::new(opts.color);
+    println!();
+    println!(
+        "{} {} ({})",
+        p.bold("Kaisen scan report for"),
+        p.cyan(&report.target),
+        report.ip
+    );
+    println!(
+        "Host is up. Scanned {} port(s) in {:.2}s.",
+        report.ports.len(),
+        report.elapsed.as_secs_f64()
+    );
+
+    let shown: Vec<&PortReport> = report
+        .ports
+        .iter()
+        .filter(|r| {
+            if opts.only_open {
+                r.state == State::Open
+            } else {
+                r.state != State::Closed || report.ports.len() <= 50
+            }
+        })
+        .collect();
+
+    let open_only: Vec<&PortReport> = report.ports.iter().filter(|r| r.state == State::Open).collect();
+
+    if open_only.is_empty() {
+        println!("{}", p.yellow("No open ports found."));
+    } else {
+        // header
+        let head = if opts.reason {
+            format!("{:<11}{:<9}{:<16}{}", "PORT", "STATE", "SERVICE", "REASON/VERSION")
+        } else {
+            format!("{:<11}{:<9}{:<16}{}", "PORT", "STATE", "SERVICE", "VERSION")
+        };
+        println!("{}", p.bold(&head));
+
+        for r in &shown {
+            if r.state == State::Closed {
+                continue;
+            }
+            let port_proto = format!("{}/tcp", r.port);
+            let state_str = match r.state {
+                State::Open => p.green(r.state.label()),
+                State::Filtered => p.yellow(r.state.label()),
+                State::Closed => p.dim(r.state.label()),
+            };
+            let svc_name = r
+                .service
+                .as_ref()
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| service_name(r.port).to_string());
+
+            let mut tail = String::new();
+            if opts.reason {
+                tail.push_str(r.reason);
+                tail.push(' ');
+            }
+            if let Some(svc) = &r.service {
+                let d = svc.describe();
+                if !d.is_empty() {
+                    tail.push_str(&d);
+                }
+            }
+
+            // Note: padding uses the uncolored widths, so we build plainly then colorize state.
+            println!(
+                "{:<11}{:<18}{:<16}{}",
+                port_proto,
+                state_str,
+                svc_name,
+                tail.trim()
+            );
+
+            // vuln findings under the port
+            for f in &r.findings {
+                let tag = sev_color(&p, f.severity, &format!("[{}]", f.severity.label()));
+                println!("    {} {} — {}", tag, p.bold(&f.id), f.title);
+                if opts.verbosity >= 2 {
+                    println!("        {}", p.dim(&f.detail));
+                }
+            }
+        }
+    }
+
+    if !opts.only_open && (report.filtered_count > 0 || report.closed_count > 0) {
+        println!(
+            "{}",
+            p.dim(&format!(
+                "{} open, {} closed, {} filtered",
+                report.open_count, report.closed_count, report.filtered_count
+            ))
+        );
+    }
+
+    if opts.os_detection {
+        println!("{} {}", p.bold("OS guess:"), report.os_guess);
+    }
+
+    if opts.vuln {
+        let total: usize = report.ports.iter().map(|r| r.findings.len()).sum();
+        if total == 0 {
+            println!("{}", p.dim("Vuln: no known-vulnerable signatures matched."));
+        } else {
+            println!("{}", p.bold(&format!("Vuln: {total} potential finding(s) — review above.")));
+        }
+    }
+}
+
+fn print_grepable(report: &HostReport) {
+    let mut ports = String::new();
+    for r in report.ports.iter().filter(|r| r.state == State::Open) {
+        let svc = r
+            .service
+            .as_ref()
+            .map(|s| s.name.clone())
+            .unwrap_or_else(|| service_name(r.port).to_string());
+        let ver = r.service.as_ref().map(|s| s.describe()).unwrap_or_default();
+        ports.push_str(&format!("{}/open/tcp//{}//{}/, ", r.port, svc, ver));
+    }
+    println!(
+        "Host: {} ({})\tStatus: Up\tPorts: {}",
+        report.ip,
+        report.target,
+        ports.trim_end_matches(", ")
+    );
+}
+
+fn print_json(report: &HostReport) {
+    let mut ports_json = Vec::new();
+    for r in &report.ports {
+        if r.state == State::Closed {
+            continue;
+        }
+        let svc = r.service.as_ref();
+        let findings: Vec<String> = r
+            .findings
+            .iter()
+            .map(|f| {
+                format!(
+                    "{{\"id\":\"{}\",\"severity\":\"{}\",\"title\":\"{}\"}}",
+                    json_escape(&f.id),
+                    f.severity.label(),
+                    json_escape(&f.title)
+                )
+            })
+            .collect();
+        ports_json.push(format!(
+            "{{\"port\":{},\"protocol\":\"tcp\",\"state\":\"{}\",\"service\":\"{}\",\"product\":\"{}\",\"version\":\"{}\",\"findings\":[{}]}}",
+            r.port,
+            r.state.label(),
+            json_escape(&svc.map(|s| s.name.clone()).unwrap_or_else(|| service_name(r.port).to_string())),
+            json_escape(&svc.map(|s| s.product.clone()).unwrap_or_default()),
+            json_escape(&svc.map(|s| s.version.clone()).unwrap_or_default()),
+            findings.join(",")
+        ));
+    }
+    println!(
+        "{{\"target\":\"{}\",\"ip\":\"{}\",\"os_guess\":\"{}\",\"elapsed_s\":{:.3},\"ports\":[{}]}}",
+        json_escape(&report.target),
+        report.ip,
+        json_escape(&report.os_guess),
+        report.elapsed.as_secs_f64(),
+        ports_json.join(",")
+    );
+}
+
+/// Print a short notice when SYN scan was requested but we lack privileges.
+pub fn syn_notice(opts: &Options) {
+    if opts.scan_kind == ScanKind::Syn {
+        let p = Painter::new(opts.color);
+        eprintln!(
+            "{}",
+            p.yellow(
+                "[!] -sS (SYN) requires raw-socket privileges (root/CAP_NET_RAW). \
+                 Falling back to unprivileged TCP connect scan (-sT)."
+            )
+        );
+    }
+}

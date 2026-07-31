@@ -1,0 +1,194 @@
+# Kaisen
+
+**A fast `nmap` + `dig` hybrid network scanner — written in Rust, works without root.**
+
+Kaisen is a single self-contained binary you install once and run from anywhere
+(`kaisen`, `kai`, or `kaison`). It combines high-speed **port scanning**,
+**service/version detection**, **best-effort OS inference**, a lightweight
+**vulnerability signature matcher**, and a full **DNS resolver** (a `dig`
+replacement) — all built on an async engine that scans thousands of ports
+concurrently.
+
+> **No root needed.** The core engine uses unprivileged TCP `connect()` scans, so
+> Kaisen runs the same on an **unrooted Termux** phone, on **Kali**, on any Linux,
+> or on macOS. Features that normally require raw sockets (`-sS` SYN scan, ICMP
+> ping, TCP/IP OS fingerprinting) degrade gracefully with a clear notice.
+
+---
+
+## Why Kaisen
+
+- ⚡ **Faster than a stock connect scan** — Rust + `tokio` async I/O pushes
+  thousands of simultaneous connections. A full 65,535-port sweep of a local host
+  completes in a couple of seconds.
+- 🧰 **Two tools in one** — port/service scanning *and* DNS resolution with the same
+  familiar flags.
+- 📦 **Single static binary, zero heavy deps** — the DNS engine is implemented from
+  scratch; port datasets and the vuln DB are embedded, so the binary works from any
+  path with nothing else installed.
+- 🌍 **Runs anywhere, no root** — Termux (unrooted), Kali, Debian/Ubuntu, Arch,
+  Fedora, Alpine, macOS.
+
+---
+
+## Install
+
+### One-liner
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/nostraxiten/kaisen/main/install.sh | sh
+```
+
+The installer detects your system, installs a Rust toolchain if needed, builds the
+release binary, and drops `kaisen` / `kai` / `kaison` into a directory on your
+`PATH` (preferring a user-writable one — **no sudo required** on Termux or when
+`~/.local/bin` is available).
+
+### Termux (unrooted)
+
+```sh
+pkg install -y git rust
+git clone https://github.com/nostraxiten/kaisen
+cd kaisen && ./install.sh
+```
+
+### From source (any OS)
+
+```sh
+git clone https://github.com/nostraxiten/kaisen
+cd kaisen
+cargo build --release
+# binary at target/release/kaisen
+```
+
+---
+
+## Quick start
+
+```sh
+# The headline example — OS guess, versions, all ports, aggressive timing, vuln check
+kaison -OS -sV -Pn -T4 -vvv -PA -vuln 192.168.1.2
+
+# Famous top-1000 ports with version detection
+kaisen -PF -sV 10.0.0.5
+
+# Hyper speed, full range, only show what's open
+kaisen -HS -PA --open scanme.example.com
+
+# DNS like dig
+kaisen dns MX example.com @8.8.8.8
+kaisen -D ANY example.com +short
+kaisen -x 1.1.1.1            # reverse lookup
+```
+
+---
+
+## Flags
+
+### Scan type
+| Flag | Alias | Meaning |
+|------|-------|---------|
+| `-sT` | `--connect` | TCP connect() scan — **default, no root** |
+| `-sS` | `--syn` | SYN half-open scan (needs root; auto-falls back to `-sT`) |
+
+### Port selection
+| Flag | Alias | Meaning |
+|------|-------|---------|
+| `-PF` | `--port-famous` | Top **1000 famous** ports (default) |
+| `-PA` | `--ports-all`, `-p-` | **All** ports (1-65535) |
+| `-F` | `--fast` | Top 100 ports |
+| `-p <SPEC>` | `--ports` | Explicit, e.g. `-p 22,80,443,8000-8100` |
+| `--top-ports <N>` | | Top N famous ports |
+
+### Detection
+| Flag | Alias | Meaning |
+|------|-------|---------|
+| `-sV` | `--service-version` | Probe open ports for service & version |
+| `-OS` | `--os-detection`, `-O` | Best-effort OS inference (heuristic, no root) |
+| `-vuln` | `--vuln` | Match services against known-vuln signatures |
+| `-A` | `--aggressive` | Enable `-sV`, `-OS` and `-vuln` together |
+
+### Host discovery
+| Flag | Meaning |
+|------|---------|
+| `-Pn` / `--no-ping` | Treat hosts as up (default — ICMP needs root) |
+
+### Timing & performance
+| Flag | Meaning |
+|------|---------|
+| `-T0` … `-T5` | Timing template: 0=paranoid … 3=normal … 5=insane |
+| `-HS` / `--hyper-speed` | Hyper speed: max concurrency, minimal timeouts |
+| `--concurrency <N>` | Max simultaneous connections |
+| `--timeout <MS>` | Per-connection timeout (ms) |
+| `--retries <N>` | Retries for filtered/timed-out ports |
+
+### Output & display
+| Flag | Meaning |
+|------|---------|
+| `--open` | Only show open ports |
+| `--reason` | Show why a port is in its state |
+| `-v`, `-vv`, `-vvv` | Increase verbosity |
+| `-oN` / `-oJ` / `-oG` | Output: Normal / JSON / Grepable |
+| `--color` / `--no-color` | Toggle colour (honours `NO_COLOR`) |
+| `-4` / `-6` | Force IPv4 / IPv6 |
+
+### DNS (dig replacement)
+| Flag | Meaning |
+|------|---------|
+| `dns` / `dig` / `resolve` | DNS subcommand |
+| `-D <TYPE>` / `--dns` | Record type: `A AAAA NS CNAME SOA PTR MX TXT SRV CAA ANY` |
+| `-x` / `--reverse` | Reverse (PTR) lookup for an IP |
+| `@server` | Query a specific DNS server (e.g. `@1.1.1.1`) |
+| `--dns-port <N>` | DNS server port (default 53) |
+| `+short` / `--short` | Terse output (answers only) |
+| `+tcp` / `--dns-tcp` | Force DNS over TCP |
+| `+ttl` / `--ttl` | Show TTL values |
+
+Run `kaisen --help` for the full, always-current reference.
+
+---
+
+## Targets
+
+Kaisen accepts hostnames, IPv4/IPv6 addresses, and IPv4 CIDR ranges (up to `/16`):
+
+```sh
+kaisen -PF 192.168.1.0/24
+kaisen -sV example.com
+kaisen -6 -p 80,443 ::1
+```
+
+---
+
+## Output formats
+
+- **Normal** (default) — human-readable, coloured, nmap-style report.
+- **JSON** (`-oJ`) — machine-readable array of host objects; pipe into `jq`.
+- **Grepable** (`-oG`) — one line per host for quick `grep`/`awk`.
+
+---
+
+## What "no root" means for each feature
+
+| Feature | Without root | With root/CAP_NET_RAW |
+|---------|--------------|-----------------------|
+| Connect scan `-sT` | ✅ full speed | ✅ |
+| SYN scan `-sS` | ↩︎ auto-falls back to `-sT` (notice printed) | (raw SYN — roadmap) |
+| Service/version `-sV` | ✅ banner + probes | ✅ |
+| DNS / `dig` | ✅ full | ✅ |
+| OS detection `-OS` | ⚠️ banner-based heuristic only | (TCP/IP fingerprint — roadmap) |
+| ICMP ping discovery | ↩︎ skipped (acts like `-Pn`) | (roadmap) |
+
+Kaisen is honest about these limits at runtime rather than silently doing less.
+
+---
+
+## Legal & ethical use
+
+Kaisen is a tool for **authorized** security testing, network administration,
+diagnostics, and education. Only scan systems you own or have explicit permission
+to test. You are responsible for complying with all applicable laws.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
