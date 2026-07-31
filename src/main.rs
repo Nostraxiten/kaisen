@@ -11,6 +11,7 @@ mod ports;
 mod scan;
 mod service;
 mod vuln;
+mod whois;
 
 use std::net::IpAddr;
 use std::process::ExitCode;
@@ -53,8 +54,95 @@ async fn main() -> ExitCode {
         }
         Mode::Dns => run_dns(&opts).await,
         Mode::Mail => run_mail(&opts).await,
+        Mode::Lookup => run_lookup(&opts).await,
+        Mode::Whois => run_whois(&opts).await,
         Mode::Scan => run_scan(&opts).await,
     }
+}
+
+async fn run_whois(opts: &Options) -> ExitCode {
+    let p = Painter::new(opts.color);
+    if opts.targets.is_empty() {
+        eprintln!("kaisen: no domain/IP for whois");
+        eprintln!("Try 'kaisen whois <domain|ip>'.");
+        return ExitCode::from(2);
+    }
+    let timeout_ms = opts.timing.connect_timeout_ms.max(6000);
+    let mut ok = true;
+    for t in &opts.targets {
+        if !whois::run(t, timeout_ms, opts.color, opts.verbosity).await {
+            ok = false;
+        }
+    }
+    let _ = p;
+    if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+}
+
+async fn run_lookup(opts: &Options) -> ExitCode {
+    let p = Painter::new(opts.color);
+    if opts.targets.is_empty() {
+        eprintln!("kaisen: no name to look up");
+        eprintln!("Try 'kaisen lookup <domain>'.");
+        return ExitCode::from(2);
+    }
+    let server = match resolve_dns_server(opts).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{}", p.red(&format!("kaisen: {e}")));
+            return ExitCode::FAILURE;
+        }
+    };
+    let timeout_ms = opts.timing.connect_timeout_ms.max(2500);
+    for name in &opts.targets {
+        lookup_profile(name, server, timeout_ms, &p).await;
+    }
+    ExitCode::SUCCESS
+}
+
+async fn lookup_profile(name: &str, server: std::net::SocketAddr, timeout_ms: u64, p: &Painter) {
+    println!();
+    println!(
+        "{} {} {}",
+        p.bold("Kaisen DNS profile for"),
+        p.cyan(name),
+        p.dim(&format!("(via {})", server.ip()))
+    );
+
+    let types = ["A", "AAAA", "CNAME", "NS", "MX", "TXT", "SOA", "CAA"];
+    let queries = types.iter().map(|t| {
+        let qt = dns::type_to_num(t).unwrap();
+        async move { (*t, dns::query(server, name, qt, false, timeout_ms).await) }
+    });
+    let results = futures::future::join_all(queries).await;
+
+    for (t, res) in results {
+        match res {
+            Ok(resp) if !resp.answers.is_empty() => {
+                for a in &resp.answers {
+                    println!(
+                        "{:<7} {:<7} {}",
+                        p.magenta(&dns::num_to_type(a.rtype)),
+                        a.ttl,
+                        a.data.render()
+                    );
+                }
+            }
+            Ok(resp) => {
+                let _ = resp;
+                if p_verbose_none(t) {
+                    println!("{:<7} {}", p.magenta(t), p.dim("(none)"));
+                }
+            }
+            Err(e) => {
+                println!("{:<7} {}", p.magenta(t), p.dim(&format!("(query failed: {e})")));
+            }
+        }
+    }
+}
+
+// Only show "(none)" lines for the record types users usually care to confirm.
+fn p_verbose_none(t: &str) -> bool {
+    matches!(t, "A" | "AAAA" | "MX" | "NS")
 }
 
 /// Resolve the DNS server to use (explicit @server / --dns-port, else system default).

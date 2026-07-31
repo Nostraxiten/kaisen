@@ -150,6 +150,24 @@ kaisen -x 1.1.1.1            # reverse lookup
 | `mail` / `email` / `mx` | Audit a domain's mail records in one shot |
 | `-M` / `--mail` | Same as the `mail` subcommand |
 
+### Lookup & WHOIS
+| Command | Meaning |
+|---------|---------|
+| `kaisen lookup <domain>` | Full DNS profile — A, AAAA, CNAME, NS, MX, TXT, SOA, CAA in one shot |
+| `kaisen whois <domain\|ip>` | From-scratch WHOIS (TCP/43) with IANA→registry→registrar referrals; `-v` for the raw record |
+
+`whois` is implemented directly over the WHOIS protocol (no external service or
+library): it asks IANA which registry owns the TLD, follows the registrar
+referral for domains, and follows the RIR referral (ARIN→RIPE/APNIC/…) for IPs,
+with a built-in TLD-server fallback. It prints a summary (registrar, dates,
+name servers, status / net-range, org, abuse contact) plus the raw record.
+
+### Mail (email posture audit)
+| Flag | Meaning |
+|------|---------|
+| `mail` / `email` / `mx` | Audit a domain's mail records in one shot |
+| `-M` / `--mail` | Same as the `mail` subcommand |
+
 `kaisen mail <domain>` checks **MX, SPF, DMARC, DKIM** (probing common selectors),
 **MTA-STS, TLS-RPT** and **CAA**, interprets each, and prints a checklist plus a
 pass/warn/problem verdict. Example:

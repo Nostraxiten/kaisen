@@ -15,6 +15,8 @@ pub enum Mode {
     Scan,
     Dns,
     Mail,
+    Lookup,
+    Whois,
     Help,
     Version,
 }
@@ -170,6 +172,14 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                 o.mode = Mode::Mail;
                 i = 1;
             }
+            "lookup" | "profile" | "host" => {
+                o.mode = Mode::Lookup;
+                i = 1;
+            }
+            "whois" => {
+                o.mode = Mode::Whois;
+                i = 1;
+            }
             "scan" => {
                 o.mode = Mode::Scan;
                 i = 1;
@@ -290,6 +300,8 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                 o.dns_reverse = true;
             }
             "-M" | "--mail" | "--mail-audit" => o.mode = Mode::Mail,
+            "-w" | "--whois" => o.mode = Mode::Whois,
+            "-L" | "--lookup" => o.mode = Mode::Lookup,
             "+short" | "--short" => o.dns_short = true,
             "+tcp" | "--dns-tcp" => o.dns_tcp = true,
             "+ttl" | "--ttl" => o.dns_trace_ttl = true,
@@ -424,9 +436,18 @@ USAGE:
     -M, --mail             Same as the `mail` subcommand
                            Checks MX, SPF, DMARC, DKIM, MTA-STS, TLS-RPT, CAA
 
+  ── LOOKUP & WHOIS ─────────────────────────────────────────────────────────
+    lookup, profile, host  Full DNS profile: A AAAA CNAME NS MX TXT SOA CAA at once
+    -L, --lookup           Same as the `lookup` subcommand
+    whois                  WHOIS for a domain or IP (from-scratch, TCP/43)
+    -w, --whois            Same as the `whois` subcommand (use -v for raw record)
+
 EXAMPLES:
     kaisen mail google.com
     kaisen -M paypal.com @1.1.1.1
+    kaisen lookup github.com
+    kaisen whois google.com
+    kaisen whois 8.8.8.8 -v
     kaisen -OS 192.168.1.2                 # just the OS + host info (focused)
     kaison -OS -sV -Pn -T4 -vvv -PA -vuln 192.168.1.2
     kaisen -PF -sV 10.0.0.5
