@@ -295,6 +295,13 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                 if other.len() >= 2 && other.starts_with('-') && other[1..].chars().all(|c| c == 'v') {
                     o.verbosity += (other.len() - 1) as u8;
                 }
+                // Accept any unambiguous abbreviation of --help / --version
+                // (e.g. `--h`, `--hel`, `--ver`).
+                else if other.len() >= 3 && "--help".starts_with(other) {
+                    return Ok(Options { mode: Mode::Help, ..o });
+                } else if other.len() >= 3 && "--version".starts_with(other) {
+                    return Ok(Options { mode: Mode::Version, ..o });
+                }
                 // bare DNS record type token in DNS mode (dig-style: `kaisen dns MX host`)
                 else if o.mode == Mode::Dns && is_dns_type(other) {
                     o.dns_types.push(other.to_ascii_uppercase());

@@ -164,6 +164,26 @@ async fn run_dns(opts: &Options) -> ExitCode {
         return ExitCode::from(2);
     }
 
+    // Warn if scan options were mixed with a DNS action (-x / -D / @server /
+    // dns subcommand). These belong to different subsystems, so the scan flags
+    // are ignored here — tell the user instead of silently dropping them.
+    if opts.os_detection
+        || opts.service_detection
+        || opts.vuln
+        || opts.only_open
+        || opts.ports_selected
+        || opts.scan_kind == cli::ScanKind::Syn
+    {
+        eprintln!(
+            "{}",
+            p.yellow(
+                "[!] DNS mode is active (from -x / -D / @server), so scan options like \
+                 -OS/-sV/-F/-PA are ignored. Run the scan without a DNS flag, e.g. \
+                 'kaisen -OS <ip>'."
+            )
+        );
+    }
+
     // Determine server.
     let server_ip: IpAddr = match &opts.dns_server {
         Some(s) => match s.parse::<IpAddr>() {
