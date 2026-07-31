@@ -407,13 +407,25 @@ pub fn print_os_report(report: &HostReport, opts: &Options) {
 
     if !has_signal {
         println!("{}", p.yellow("Could not determine the OS."));
+        if report.open_count > 0 {
+            println!("{:<14}{}", p.bold("Role:"), role);
+            println!(
+                "{}",
+                p.dim(&format!(
+                    "{} open port(s), but none exposed an OS-identifying signal (no banner, no ICMP/SNMP reply). \
+                     CDNs and front-ends like Google/Cloudflare deliberately hide this.",
+                    report.open_count
+                ))
+            );
+        } else {
+            println!(
+                "{}",
+                p.dim("No port responded and the host did not answer ICMP/SNMP — nothing to analyse (likely firewalled).")
+            );
+        }
         println!(
             "{}",
-            p.dim("No port responded and the host did not answer ICMP/SNMP, so there was no signal to analyse (likely firewalled).")
-        );
-        println!(
-            "{}",
-            p.dim("Tip: run a wider scan first, e.g.  kaisen -sV -PF <target>")
+            p.dim("Tip: try a wider scan (kaisen -sV -PF <target>) or check for SNMP/FTP on an internal host.")
         );
         return;
     }
