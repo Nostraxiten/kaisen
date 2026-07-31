@@ -12,19 +12,21 @@ concurrently.
 > or on macOS. Features that normally require raw sockets (`-sS` SYN scan, ICMP
 > ping, TCP/IP OS fingerprinting) degrade gracefully with a clear notice.
 
+<img width="500" height="474" alt="image" src="https://github.com/user-attachments/assets/0908f363-7457-4ad0-914f-8dd10b3eba19" />
+
 ---
 
 ## Why Kaisen
 
-- ⚡ **Faster than a stock connect scan** — Rust + `tokio` async I/O pushes
+-  **Faster than a stock connect scan** — Rust + `tokio` async I/O pushes
   thousands of simultaneous connections. A full 65,535-port sweep of a local host
   completes in a couple of seconds.
-- 🧰 **Two tools in one** — port/service scanning *and* DNS resolution with the same
+-  **Two tools in one** — port/service scanning *and* DNS resolution with the same
   familiar flags.
-- 📦 **Single static binary, zero heavy deps** — the DNS engine is implemented from
+-  **Single static binary, zero heavy deps** — the DNS engine is implemented from
   scratch; port datasets and the vuln DB are embedded, so the binary works from any
   path with nothing else installed.
-- 🌍 **Runs anywhere, no root** — Termux (unrooted), Kali, Debian/Ubuntu, Arch,
+-  **Runs anywhere, no root** — Termux (unrooted), Kali, Debian/Ubuntu, Arch,
   Fedora, Alpine, macOS.
 
 ---
@@ -260,14 +262,6 @@ TTL, and the exact signals) instead of a port table. Certainty is highest when
 the host answers ICMP or exposes SNMP/FTP/identifying banners; when it exposes
 none of these unprivileged detection can only narrow the family, and Kaisen says
 so rather than guessing.
-
----
-
-## Legal & ethical use
-
-Kaisen is a tool for **authorized** security testing, network administration,
-diagnostics, and education. Only scan systems you own or have explicit permission
-to test. You are responsible for complying with all applicable laws.
 
 ## License
 
