@@ -4,6 +4,7 @@
 
 mod cli;
 mod dns;
+mod osfp;
 mod output;
 mod ports;
 mod scan;

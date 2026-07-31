@@ -190,10 +190,31 @@ so they don't pollute redirected results.
 | SYN scan `-sS` | ↩︎ auto-falls back to `-sT` (notice printed) | (raw SYN — roadmap) |
 | Service/version `-sV` | ✅ banner + probes | ✅ |
 | DNS / `dig` | ✅ full | ✅ |
-| OS detection `-OS` | ⚠️ banner-based heuristic only | (TCP/IP fingerprint — roadmap) |
+| OS detection `-OS` | ✅ multi-signal (TTL + SNMP + banners), see below | (TCP/IP fingerprint — roadmap) |
 | ICMP ping discovery | ↩︎ skipped (acts like `-Pn`) | (roadmap) |
 
 Kaisen is honest about these limits at runtime rather than silently doing less.
+
+### How `-OS` detects the OS without root
+
+A raw TCP/IP fingerprint (nmap's `-O`) needs `CAP_NET_RAW`. Instead Kaisen
+combines several **unprivileged** signals and scores them by confidence:
+
+- **ICMP TTL** via the system `ping` (unprivileged on Linux/Kali/Termux/macOS).
+  Initial TTL reveals the family — 64 → Linux/Unix/macOS/Android, 128 → Windows,
+  255 → network gear/BSD/Solaris — and the hop count.
+- **SNMP `sysDescr`** (UDP/161, community `public`): the *exact* OS string when
+  the host exposes SNMP.
+- **FTP `SYST`**: the FTP server itself announces `UNIX`/`Windows`.
+- **Service banners**: SSH/HTTP/SMTP version strings that name the distro
+  (e.g. `OpenSSH ... Ubuntu`, `Server: Apache/2.4 (Debian)`).
+- **Open-port profile** as a weak fallback (e.g. 445/3389 → Windows).
+
+Used alone, `kaisen -OS <target>` prints a focused report (OS, confidence, role,
+TTL, and the exact signals) instead of a port table. Certainty is highest when
+the host answers ICMP or exposes SNMP/FTP/identifying banners; when it exposes
+none of these unprivileged detection can only narrow the family, and Kaisen says
+so rather than guessing.
 
 ---
 

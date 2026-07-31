@@ -92,6 +92,33 @@ pub async fn detect(addr: SocketAddr, default_name: &str, timeout_ms: u64) -> Se
     info.banner = text.lines().next().unwrap_or("").trim().to_string();
 
     parse_banner(port, &text, &mut info);
+
+    // Active FTP probe: the SYST command makes the server announce its OS type,
+    // e.g. "215 UNIX Type: L8" or "215 Windows_NT". Strong, unprivileged signal.
+    if info.name == "ftp" {
+        let _ = timeout(dur, stream.write_all(b"SYST\r\n")).await;
+        let mut sbuf = vec![0u8; 512];
+        if let Ok(Ok(n)) = timeout(dur, stream.read(&mut sbuf)).await {
+            if n > 0 {
+                let syst = String::from_utf8_lossy(&sbuf[..n]);
+                let line = syst.lines().next().unwrap_or("").trim();
+                if let Some(rest) = line.strip_prefix("215 ").or_else(|| line.strip_prefix("215-")) {
+                    if info.extra.is_empty() {
+                        info.extra = rest.trim().to_string();
+                    }
+                    let up = rest.to_ascii_uppercase();
+                    if up.contains("WINDOWS") || up.contains("WIN32") || up.contains("WIN_NT") {
+                        info.os_hint = "Windows".into();
+                    } else if (up.contains("UNIX") || up.contains("LINUX") || up.contains("L8"))
+                        && info.os_hint.is_empty() {
+                            info.os_hint = "Unix / Linux-like".into();
+                        }
+                    detect_os_from_text(rest, &mut info);
+                }
+            }
+        }
+    }
+
     info
 }
 

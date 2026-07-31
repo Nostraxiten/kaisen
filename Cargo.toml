@@ -15,7 +15,7 @@ name = "kaisen"
 path = "src/main.rs"
 
 [dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros", "io-util", "sync"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "time", "macros", "io-util", "sync", "process"] }
 futures = "0.3"
 
 [profile.release]

@@ -50,6 +50,7 @@ pub struct HostReport {
     pub open_count: usize,
     pub closed_count: usize,
     pub filtered_count: usize,
+    pub probes: Option<crate::osfp::Probes>,
 }
 
 /// Expand a target string into concrete IPs. Supports hostname, IPv4/IPv6, and
@@ -212,32 +213,33 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options) -> HostReport {
         }
     }
 
-    // Phase 3: OS inference from collected banners.
-    let mut os_guess = String::new();
-    if opts.os_detection {
-        for r in &reports {
-            if let Some(svc) = &r.service {
-                if !svc.os_hint.is_empty() {
-                    os_guess = svc.os_hint.clone();
-                    break;
-                }
-            }
-        }
-        if os_guess.is_empty() {
-            os_guess = "unknown (no root: TCP/IP fingerprint unavailable; based on banners only)".into();
-        }
-    }
+    // Phase 3: network-level OS probes (TTL via ping, SNMP sysDescr) — only in
+    // OS-detection mode, run best-effort and unprivileged.
+    let probes = if opts.os_detection {
+        Some(crate::osfp::probe(ip).await)
+    } else {
+        None
+    };
 
-    HostReport {
+    let mut report = HostReport {
         target: target.to_string(),
         ip,
         ports: reports,
-        os_guess,
+        os_guess: String::new(),
         elapsed: start.elapsed(),
         open_count,
         closed_count,
         filtered_count,
+        probes,
+    };
+
+    // Phase 4: combine every signal into a single OS guess string.
+    if opts.os_detection {
+        let (os, _conf, _role, _signals) = infer_os(&report);
+        report.os_guess = os;
     }
+
+    report
 }
 
 fn sev_color(p: &Painter, sev: Severity, s: &str) -> String {
@@ -258,47 +260,94 @@ pub fn print_report(report: &HostReport, opts: &Options) {
     }
 }
 
-/// Aggregate an OS guess from banner hints and, failing that, from which ports
-/// are open. Returns (os_family, confidence, role_summary).
-fn infer_os(report: &HostReport) -> (String, &'static str, String) {
-    // 1) Banner-based hints (strongest signal).
-    let mut counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for r in &report.ports {
-        if r.state == State::Open {
-            if let Some(svc) = &r.service {
-                if !svc.os_hint.is_empty() {
-                    *counts.entry(svc.os_hint.clone()).or_insert(0) += 1;
-                }
-            }
-        }
-    }
+/// Combine every available signal (banners, FTP-SYST, SNMP, TTL, open-port
+/// profile) into a single weighted OS guess. Returns
+/// (os_string, confidence, role_summary, human-readable signals).
+fn infer_os(report: &HostReport) -> (String, &'static str, String, Vec<String>) {
     let open_ports: Vec<u16> = report
         .ports
         .iter()
         .filter(|r| r.state == State::Open)
         .map(|r| r.port)
         .collect();
-
-    // Human-friendly role summary from the open services.
     let role = describe_role(&open_ports);
+    let mut signals: Vec<String> = Vec::new();
 
-    if let Some((hint, n)) = counts.iter().max_by_key(|(_, n)| **n) {
-        let conf = if *n >= 2 { "high" } else { "medium" };
-        return (hint.clone(), conf, role);
+    // Weighted votes toward an OS *string*. Higher weight = stronger evidence.
+    let mut score: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    let mut vote = |os: &str, w: u32| {
+        if !os.is_empty() {
+            *score.entry(os.to_string()).or_insert(0) += w;
+        }
+    };
+
+    // 1) SNMP sysDescr — the exact OS string when present (strongest).
+    if let Some(pr) = &report.probes {
+        if let Some(snmp) = &pr.snmp_os {
+            let short: String = snmp.split_whitespace().take(6).collect::<Vec<_>>().join(" ");
+            vote(&short, 6);
+            signals.push(format!("SNMP sysDescr: {snmp}"));
+        }
     }
 
-    // 2) Port-based fallback (weaker).
+    // 2) Banner / FTP-SYST hints (strong, and often name the distro).
+    for r in &report.ports {
+        if r.state == State::Open {
+            if let Some(svc) = &r.service {
+                if !svc.os_hint.is_empty() {
+                    vote(&svc.os_hint, 3);
+                    signals.push(format!(
+                        "{}/{} banner -> {}",
+                        r.port, svc.name, svc.os_hint
+                    ));
+                }
+            }
+        }
+    }
+
+    // 3) TTL family from ping (independent corroboration of the family).
+    if let Some(pr) = &report.probes {
+        if let (Some(ttl), Some(fam)) = (pr.ttl, pr.ttl_family) {
+            let hops = pr.ttl_hops.map(|h| h.to_string()).unwrap_or_else(|| "?".into());
+            signals.push(format!("ICMP TTL={ttl} (~{hops} hops) -> {fam}"));
+            // Boost whichever family the TTL agrees with; otherwise vote family.
+            let fam_key = if fam.starts_with("Windows") {
+                "Windows"
+            } else if fam.starts_with("Linux") {
+                "Linux / Unix"
+            } else {
+                "Network device / BSD / Solaris"
+            };
+            vote(fam_key, 2);
+        }
+    }
+
+    // 4) Open-port profile (weak fallback).
     let has = |p: u16| open_ports.contains(&p);
     if has(3389) || has(445) || has(139) || has(135) {
-        return ("Windows (likely)".into(), "low", role);
+        vote("Windows", 1);
     }
     if has(22) || has(111) || has(631) {
-        return ("Unix / Linux-like (likely)".into(), "low", role);
+        vote("Linux / Unix", 1);
     }
+
+    // Pick the highest-scoring OS.
+    if let Some((os, best)) = score.iter().max_by_key(|(_, w)| **w) {
+        let total: u32 = score.values().sum();
+        let confidence = if *best >= 6 {
+            "high"
+        } else if *best >= 3 && *best * 2 >= total {
+            "medium"
+        } else {
+            "low"
+        };
+        return (os.clone(), confidence, role, signals);
+    }
+
     if open_ports.is_empty() {
-        return ("unknown".into(), "none", role);
+        return ("unknown".into(), "none", role, signals);
     }
-    ("unknown".into(), "low", role)
+    ("unknown".into(), "low", role, signals)
 }
 
 fn describe_role(ports: &[u16]) -> String {
@@ -353,11 +402,14 @@ pub fn print_os_report(report: &HostReport, opts: &Options) {
     );
     println!();
 
-    if report.open_count == 0 {
+    let (os, confidence, role, signals) = infer_os(report);
+    let has_signal = os != "unknown" || !signals.is_empty();
+
+    if !has_signal {
         println!("{}", p.yellow("Could not determine the OS."));
         println!(
             "{}",
-            p.dim("No probed port responded, so there were no banners to analyse (host may be firewalled).")
+            p.dim("No port responded and the host did not answer ICMP/SNMP, so there was no signal to analyse (likely firewalled).")
         );
         println!(
             "{}",
@@ -366,7 +418,6 @@ pub fn print_os_report(report: &HostReport, opts: &Options) {
         return;
     }
 
-    let (os, confidence, role) = infer_os(report);
     let conf_c = match confidence {
         "high" => p.green(confidence),
         "medium" => p.yellow(confidence),
@@ -376,48 +427,34 @@ pub fn print_os_report(report: &HostReport, opts: &Options) {
     println!("{:<14}{}", p.bold("OS:"), p.bold(&os));
     println!("{:<14}{}", p.bold("Confidence:"), conf_c);
     println!("{:<14}{}", p.bold("Role:"), role);
-
-    // Evidence: the banners the guess is based on.
-    let mut evidence = Vec::new();
-    for r in &report.ports {
-        if r.state == State::Open {
-            if let Some(svc) = &r.service {
-                let desc = svc.describe();
-                if !svc.os_hint.is_empty() || !desc.is_empty() {
-                    let line = format!(
-                        "{}/tcp {} {}",
-                        r.port,
-                        svc.name,
-                        if desc.is_empty() { svc.banner.clone() } else { desc }
-                    );
-                    let arrow = if svc.os_hint.is_empty() {
-                        String::new()
-                    } else {
-                        format!("  -> {}", svc.os_hint)
-                    };
-                    evidence.push(format!("{}{}", line.trim(), arrow));
-                }
-            }
+    if let Some(pr) = &report.probes {
+        if let Some(ttl) = pr.ttl {
+            let hops = pr.ttl_hops.map(|h| h.to_string()).unwrap_or_else(|| "?".into());
+            println!(
+                "{:<14}{} (~{} hop(s), family: {})",
+                p.bold("TTL:"),
+                ttl,
+                hops,
+                pr.ttl_family.unwrap_or("?")
+            );
         }
     }
-    if !evidence.is_empty() {
-        println!("{}", p.bold("Evidence:"));
-        for e in &evidence {
-            println!("  - {e}");
+
+    // Show the concrete signals the guess is built from.
+    if !signals.is_empty() {
+        println!("{}", p.bold("Signals:"));
+        for s in &signals {
+            println!("  - {s}");
         }
-    } else {
-        println!(
-            "{}",
-            p.dim("Evidence: none of the open ports exposed an OS-identifying banner.")
-        );
     }
 
     println!();
     println!(
         "{}",
         p.dim(
-            "Note: running without root — OS is inferred from service banners, not a raw TCP/IP \
-             fingerprint. For deeper detection add -sV or run a full scan."
+            "Note: running without root, so Kaisen infers the OS from ICMP TTL, SNMP and service \
+             banners rather than a raw TCP/IP fingerprint. SNMP/FTP-SYST/TTL greatly improve certainty \
+             when the host exposes them."
         )
     );
 }
