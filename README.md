@@ -144,6 +144,25 @@ kaisen -x 1.1.1.1            # reverse lookup
 | `+tcp` / `--dns-tcp` | Force DNS over TCP |
 | `+ttl` / `--ttl` | Show TTL values |
 
+### Mail (email posture audit)
+| Flag | Meaning |
+|------|---------|
+| `mail` / `email` / `mx` | Audit a domain's mail records in one shot |
+| `-M` / `--mail` | Same as the `mail` subcommand |
+
+`kaisen mail <domain>` checks **MX, SPF, DMARC, DKIM** (probing common selectors),
+**MTA-STS, TLS-RPT** and **CAA**, interprets each, and prints a checklist plus a
+pass/warn/problem verdict. Example:
+
+```
+$ kaisen mail github.com
+[OK] MX        0 github-com.mail.protection.outlook.com
+[OK] DMARC     v=DMARC1; p=quarantine; sp=reject; ...   (good)
+[OK] DKIM      selector(s) found: google, selector1, k1, k2
+[OK] CAA       issue digicert.com, issue letsencrypt.org, ...
+Summary: 4 passed, 2 warning(s), 0 problem(s)
+```
+
 Run `kaisen --help` for the full, always-current reference.
 
 ---

@@ -4,6 +4,7 @@
 
 mod cli;
 mod dns;
+mod mail;
 mod osfp;
 mod output;
 mod ports;
@@ -51,8 +52,47 @@ async fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Mode::Dns => run_dns(&opts).await,
+        Mode::Mail => run_mail(&opts).await,
         Mode::Scan => run_scan(&opts).await,
     }
+}
+
+/// Resolve the DNS server to use (explicit @server / --dns-port, else system default).
+async fn resolve_dns_server(opts: &Options) -> Result<std::net::SocketAddr, String> {
+    let server_ip: IpAddr = match &opts.dns_server {
+        Some(s) => match s.parse::<IpAddr>() {
+            Ok(ip) => ip,
+            Err(_) => tokio::net::lookup_host((s.as_str(), opts.dns_port))
+                .await
+                .map_err(|e| format!("cannot resolve DNS server {s}: {e}"))?
+                .next()
+                .map(|sa| sa.ip())
+                .ok_or_else(|| format!("cannot resolve DNS server {s}"))?,
+        },
+        None => dns::default_server(),
+    };
+    Ok(std::net::SocketAddr::new(server_ip, opts.dns_port))
+}
+
+async fn run_mail(opts: &Options) -> ExitCode {
+    let p = Painter::new(opts.color);
+    if opts.targets.is_empty() {
+        eprintln!("kaisen: no domain to audit");
+        eprintln!("Try 'kaisen mail <domain>'.");
+        return ExitCode::from(2);
+    }
+    let server = match resolve_dns_server(opts).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{}", p.red(&format!("kaisen: {e}")));
+            return ExitCode::FAILURE;
+        }
+    };
+    let timeout_ms = opts.timing.connect_timeout_ms.max(2500);
+    for domain in &opts.targets {
+        mail::audit(domain, server, timeout_ms, opts.color, opts.verbosity).await;
+    }
+    ExitCode::SUCCESS
 }
 
 async fn run_scan(opts_in: &Options) -> ExitCode {

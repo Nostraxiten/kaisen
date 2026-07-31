@@ -14,6 +14,7 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub enum Mode {
     Scan,
     Dns,
+    Mail,
     Help,
     Version,
 }
@@ -165,6 +166,10 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                 o.mode = Mode::Dns;
                 i = 1;
             }
+            "mail" | "email" | "mx" => {
+                o.mode = Mode::Mail;
+                i = 1;
+            }
             "scan" => {
                 o.mode = Mode::Scan;
                 i = 1;
@@ -178,10 +183,13 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
     while i < args.len() {
         let a = &args[i];
 
-        // @server  (dig-style DNS server selection -> implies DNS mode)
+        // @server  (dig-style DNS server selection). Implies DNS mode only if we
+        // aren't already in an explicit DNS/mail subcommand.
         if let Some(server) = a.strip_prefix('@') {
             o.dns_server = Some(server.to_string());
-            o.mode = Mode::Dns;
+            if o.mode == Mode::Scan {
+                o.mode = Mode::Dns;
+            }
             i += 1;
             continue;
         }
@@ -281,6 +289,7 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                 o.mode = Mode::Dns;
                 o.dns_reverse = true;
             }
+            "-M" | "--mail" | "--mail-audit" => o.mode = Mode::Mail,
             "+short" | "--short" => o.dns_short = true,
             "+tcp" | "--dns-tcp" => o.dns_tcp = true,
             "+ttl" | "--ttl" => o.dns_trace_ttl = true,
@@ -410,7 +419,14 @@ USAGE:
     -h, --help             Show this help
     -V, --version          Show version
 
+  ── MAIL (email posture audit) ─────────────────────────────────────────────
+    mail, email, mx        Audit a domain's mail records in one shot
+    -M, --mail             Same as the `mail` subcommand
+                           Checks MX, SPF, DMARC, DKIM, MTA-STS, TLS-RPT, CAA
+
 EXAMPLES:
+    kaisen mail google.com
+    kaisen -M paypal.com @1.1.1.1
     kaisen -OS 192.168.1.2                 # just the OS + host info (focused)
     kaison -OS -sV -Pn -T4 -vvv -PA -vuln 192.168.1.2
     kaisen -PF -sV 10.0.0.5
