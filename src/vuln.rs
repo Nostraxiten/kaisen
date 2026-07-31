@@ -67,17 +67,6 @@ const SIGS: &[Sig] = &[
         matches: |v| ver_tuple(v) < (7, 7, 0) && ver_tuple(v) != (0, 0, 0),
     },
     Sig {
-        product: "OpenSSH",
-        id: "CVE-2016-0777",
-        severity: Severity::Medium,
-        title: "OpenSSH roaming information leak",
-        detail: "OpenSSH client 5.4-7.1 roaming feature may leak private keys.",
-        matches: |v| {
-            let t = ver_tuple(v);
-            ((5, 4, 0)..=(7, 1, 0)).contains(&t)
-        },
-    },
-    Sig {
         product: "vsFTPd",
         id: "CVE-2011-2523",
         severity: Severity::Critical,
