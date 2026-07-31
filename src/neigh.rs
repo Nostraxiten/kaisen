@@ -39,6 +39,44 @@ const SUBDOMAINS: &[&str] = &[
     "dashboard", "panel", "console", "manage", "management", "office", "corp",
 ];
 
+/// Recognise generic CDN/cloud reverse-DNS names (auto-generated per IP) so we
+/// can collapse them instead of flooding the output with a whole provider /24.
+fn cdn_provider(host: &str) -> Option<&'static str> {
+    const PROVIDERS: &[(&str, &str)] = &[
+        ("akamaitechnologies.com", "Akamai"),
+        ("akamaiedge.net", "Akamai"),
+        ("akamai.net", "Akamai"),
+        ("edgekey.net", "Akamai"),
+        ("edgesuite.net", "Akamai"),
+        ("cloudfront.net", "CloudFront"),
+        ("amazonaws.com", "AWS"),
+        ("cloudflare.com", "Cloudflare"),
+        ("cloudflare.net", "Cloudflare"),
+        ("googleusercontent.com", "Google"),
+        ("1e100.net", "Google"),
+        ("cloudapp.azure.com", "Azure"),
+        ("cloudapp.net", "Azure"),
+        ("fastly.net", "Fastly"),
+        ("fastlylb.net", "Fastly"),
+        ("incapdns.net", "Imperva"),
+        ("stackpathdns.com", "StackPath"),
+        ("cdn77.org", "CDN77"),
+        ("llnwd.net", "Limelight"),
+        ("footprint.net", "CenturyLink"),
+        ("azureedge.net", "Azure"),
+        ("azurefd.net", "Azure"),
+        ("digitalocean.com", "DigitalOcean"),
+        ("linode.com", "Linode"),
+        ("hetzner.com", "Hetzner"),
+        ("ovh.net", "OVH"),
+    ];
+    let h = host.to_ascii_lowercase();
+    PROVIDERS
+        .iter()
+        .find(|(suf, _)| h.ends_with(suf))
+        .map(|(_, name)| *name)
+}
+
 async fn resolve_a(server: SocketAddr, name: &str, timeout_ms: u64) -> BTreeSet<Ipv4Addr> {
     let qt = dns::type_to_num("A").unwrap();
     let mut out = BTreeSet::new();
@@ -192,13 +230,45 @@ pub async fn run(
         } else {
             let root = domain.rsplitn(3, '.').take(2).collect::<Vec<_>>();
             let root_suffix = root.into_iter().rev().collect::<Vec<_>>().join(".");
+
+            // Categorise: same-domain neighbours (gold), other notable hosts, and
+            // generic CDN/cloud auto-PTRs (noise we collapse into a count).
+            let mut related: Vec<(Ipv4Addr, String)> = Vec::new();
+            let mut other: Vec<(Ipv4Addr, String)> = Vec::new();
+            let mut cdn: BTreeMap<&'static str, usize> = BTreeMap::new();
             for (ip, name) in sorted {
-                // Highlight neighbours that belong to the same base domain.
                 if name.ends_with(&root_suffix) {
-                    println!("  {:<16} {}", ip, p.cyan(&name));
+                    related.push((ip, name));
+                } else if let Some(prov) = cdn_provider(&name) {
+                    *cdn.entry(prov).or_insert(0) += 1;
                 } else {
-                    println!("  {:<16} {}", ip, name);
+                    other.push((ip, name));
                 }
+            }
+
+            if related.is_empty() && other.is_empty() {
+                println!("{}", p.dim("  (only generic CDN/cloud PTRs in range — see summary below)"));
+            }
+            for (ip, name) in &related {
+                println!("  {:<16} {}", ip, p.cyan(name));
+            }
+            const MAX_OTHER: usize = 40;
+            for (ip, name) in other.iter().take(MAX_OTHER) {
+                println!("  {:<16} {}", ip, name);
+            }
+            if other.len() > MAX_OTHER {
+                println!("{}", p.dim(&format!("  ... and {} more", other.len() - MAX_OTHER)));
+            }
+            if !cdn.is_empty() {
+                let summary = cdn
+                    .iter()
+                    .map(|(prov, n)| format!("{prov} ({n})"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                println!(
+                    "{}",
+                    p.dim(&format!("  [hidden] {summary} — generic CDN/cloud auto-PTRs"))
+                );
             }
         }
     }
