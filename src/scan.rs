@@ -273,23 +273,29 @@ fn print_normal(report: &HostReport, opts: &Options) {
         report.elapsed.as_secs_f64()
     );
 
+    let open_only: Vec<&PortReport> =
+        report.ports.iter().filter(|r| r.state == State::Open).collect();
+
+    // Collapse the (usually huge) list of filtered/closed ports into a summary,
+    // like nmap does. Only enumerate them individually when the user explicitly
+    // wants detail (-vv or --reason) or when there are just a handful.
+    let non_open = report.filtered_count + report.closed_count;
+    let list_non_open = !opts.only_open && (opts.verbosity >= 2 || opts.reason || non_open <= 25);
+
     let shown: Vec<&PortReport> = report
         .ports
         .iter()
-        .filter(|r| {
-            if opts.only_open {
-                r.state == State::Open
-            } else {
-                r.state != State::Closed || report.ports.len() <= 50
-            }
-        })
+        .filter(|r| r.state == State::Open || list_non_open)
         .collect();
 
-    let open_only: Vec<&PortReport> = report.ports.iter().filter(|r| r.state == State::Open).collect();
-
     if open_only.is_empty() {
-        println!("{}", p.yellow("No open ports found."));
-    } else {
+        println!(
+            "{}",
+            p.yellow(&format!("No open ports found ({} scanned).", report.ports.len()))
+        );
+    }
+
+    if !shown.is_empty() {
         // header
         let head = if opts.reason {
             format!("{:<11}{:<9}{:<16}{}", "PORT", "STATE", "SERVICE", "REASON/VERSION")
@@ -299,9 +305,6 @@ fn print_normal(report: &HostReport, opts: &Options) {
         println!("{}", p.bold(&head));
 
         for r in &shown {
-            if r.state == State::Closed {
-                continue;
-            }
             let port_proto = format!("{}/tcp", r.port);
             let state_str = match r.state {
                 State::Open => p.green(r.state.label()),
@@ -344,6 +347,17 @@ fn print_normal(report: &HostReport, opts: &Options) {
                 }
             }
         }
+    }
+
+    // Collapsed line for the ports we deliberately did not enumerate.
+    if !opts.only_open && !list_non_open && non_open > 0 {
+        println!(
+            "{}",
+            p.dim(&format!(
+                "Not shown: {} filtered, {} closed port(s) — use -vv or --reason to list them.",
+                report.filtered_count, report.closed_count
+            ))
+        );
     }
 
     if !opts.only_open && (report.filtered_count > 0 || report.closed_count > 0) {
