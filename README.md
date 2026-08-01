@@ -263,6 +263,7 @@ the host answers ICMP or exposes SNMP/FTP/identifying banners; when it exposes
 none of these unprivileged detection can only narrow the family, and Kaisen says
 so rather than guessing.
 
+
 ## License
 
 MIT — see [LICENSE](LICENSE).
