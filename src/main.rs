@@ -16,6 +16,7 @@ mod whois;
 
 use std::net::IpAddr;
 use std::process::ExitCode;
+use std::time::Instant;
 
 use cli::{Mode, Options, OutputFormat};
 use output::Painter;
@@ -277,11 +278,16 @@ async fn run_scan(opts_in: &Options) -> ExitCode {
 
     let total = hosts.len();
     let mut any_open = false;
+    let mut up_count = 0usize;
+    let sweep_start = Instant::now();
     for (idx, (target, ip)) in hosts.into_iter().enumerate() {
         if idx > 0 && opts.timing.host_delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(opts.timing.host_delay_ms)).await;
         }
         let report = scan::scan_host(&target, ip, opts).await;
+        if report.host_up {
+            up_count += 1;
+        }
         if report.open_count > 0 {
             any_open = true;
         }
@@ -293,11 +299,23 @@ async fn run_scan(opts_in: &Options) -> ExitCode {
         } else {
             scan::print_report(&report, opts);
         }
-        let _ = total;
     }
 
     if json {
         println!("]");
+    }
+
+    // Nmap-style tally: with many targets and mostly-silent hosts skipped
+    // from the report above, this is the only place their count shows up.
+    if opts.output == OutputFormat::Normal {
+        println!();
+        println!(
+            "{}",
+            p.dim(&format!(
+                "Kaisen done: {total} IP address(es) ({up_count} host(s) up) scanned in {:.2}s",
+                sweep_start.elapsed().as_secs_f64()
+            ))
+        );
     }
 
     if any_open {

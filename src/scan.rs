@@ -431,6 +431,22 @@ fn describe_role(ports: &[u16]) -> String {
 /// bit of context about the host, instead of the port table.
 pub fn print_os_report(report: &HostReport, opts: &Options) {
     let p = Painter::new(opts.color);
+    if !report.host_up {
+        if opts.verbosity >= 1 {
+            println!();
+            println!(
+                "{} {} ({})",
+                p.bold("Kaisen OS detection for"),
+                p.cyan(&report.target),
+                report.ip
+            );
+            println!(
+                "{}",
+                p.yellow("Note: Host seems down. If it is really up, but blocking our probes, try -Pn.")
+            );
+        }
+        return;
+    }
     println!();
     println!(
         "{} {} ({})",
@@ -438,13 +454,6 @@ pub fn print_os_report(report: &HostReport, opts: &Options) {
         p.cyan(&report.target),
         report.ip
     );
-    if !report.host_up {
-        println!(
-            "{}",
-            p.yellow("Note: Host seems down. If it is really up, but blocking our probes, try -Pn.")
-        );
-        return;
-    }
     println!(
         "Host is up. Probed {} port(s) in {:.2}s.",
         report.ports.len(),
@@ -523,6 +532,25 @@ pub fn print_os_report(report: &HostReport, opts: &Options) {
 
 fn print_normal(report: &HostReport, opts: &Options) {
     let p = Painter::new(opts.color);
+    if !report.host_up {
+        // Match nmap's default terseness: a dead/silent address gets no
+        // report block at all, just a line in the final tally — only show
+        // the per-host note when the user explicitly asked for detail.
+        if opts.verbosity >= 1 {
+            println!();
+            println!(
+                "{} {} ({})",
+                p.bold("Kaisen scan report for"),
+                p.cyan(&report.target),
+                report.ip
+            );
+            println!(
+                "{}",
+                p.yellow("Note: Host seems down. If it is really up, but blocking our probes, try -Pn.")
+            );
+        }
+        return;
+    }
     println!();
     println!(
         "{} {} ({})",
@@ -530,13 +558,6 @@ fn print_normal(report: &HostReport, opts: &Options) {
         p.cyan(&report.target),
         report.ip
     );
-    if !report.host_up {
-        println!(
-            "{}",
-            p.yellow("Note: Host seems down. If it is really up, but blocking our probes, try -Pn.")
-        );
-        return;
-    }
     println!(
         "Host is up. Scanned {} port(s) in {:.2}s.",
         report.ports.len(),
