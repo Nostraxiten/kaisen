@@ -78,6 +78,8 @@ pub struct Options {
     pub ports_selected: bool,
     pub service_detection: bool,
     pub os_detection: bool,
+    pub mac_info: bool,        // -MC: MAC address from the local ARP/neighbor cache
+    pub device_detection: bool, // -DP: best-effort device-type guess (phone/console/PC/...)
     pub vuln: bool,
     pub only_open: bool,
     pub reason: bool,
@@ -116,6 +118,8 @@ impl Default for Options {
             ports_selected: false,
             service_detection: false,
             os_detection: false,
+            mac_info: false,
+            device_detection: false,
             vuln: false,
             only_open: false,
             reason: false,
@@ -247,6 +251,8 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             // ---- detection ----
             "-sV" | "--service-version" | "-SV" => o.service_detection = true,
             "-OS" | "--os-detection" | "-O" => o.os_detection = true,
+            "-MC" | "--mac" => o.mac_info = true,
+            "-DP" | "--device" => o.device_detection = true,
             "-vuln" | "--vuln" | "--script=vuln" => o.vuln = true,
             "-A" | "--aggressive" => {
                 o.service_detection = true;
@@ -406,6 +412,17 @@ USAGE:
                            'OS guess' line. Heuristic, works without root.
     -vuln, --vuln          Match detected services against known-vuln signatures
     -A,  --aggressive      Enable -sV, -OS and -vuln together
+    -MC, --mac             Show the target's MAC address, read from the OS's
+                           own ARP/neighbor cache. Only resolvable for a
+                           directly-connected local subnet (no root, no
+                           cross-subnet ARP) — shown as unknown otherwise.
+    -DP, --device          Best-effort device-type guess (Windows/Linux PC,
+                           Mac, iPhone/iPad, Android, Xbox, PlayStation, ...).
+                           Heuristic: layers a few device-specific ports
+                           (e.g. iPhone's 62078) on top of the same signals
+                           as -OS. No root, so it can miss or mislabel —
+                           some devices (e.g. Nintendo Switch) have no
+                           reliable unprivileged signature and show unknown.
 
   ── HOST DISCOVERY ─────────────────────────────────────────────────────────
     -Pn, --no-ping         Skip discovery, treat every target as online.
@@ -462,6 +479,7 @@ EXAMPLES:
     kaisen neighbor example.com
     kaisen neig example.com @1.1.1.1
     kaisen -OS 192.168.1.2                 # just the OS + host info (focused)
+    kaisen -MC -DP 192.168.1.0/24          # MAC + device-type guess per host
     kaison -OS -sV -Pn -T4 -vvv -PA -vuln 192.168.1.2
     kaisen -PF -sV 10.0.0.5
     kaisen -HS -p 1-65535 --open scanme.example.com

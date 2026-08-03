@@ -127,58 +127,78 @@ fn parse_ttl(s: &str) -> Option<u8> {
 /// entry for `ip`, meaning the device answered at layer 2 regardless of
 /// whether anything above that responded.
 pub async fn arp_alive(ip: IpAddr) -> bool {
-    let IpAddr::V4(_) = ip else { return false };
+    arp_lookup(ip).await.is_some()
+}
+
+/// Look up the resolved MAC address for `ip` in the OS's own ARP/neighbor
+/// cache (used by `-MC` and as the `arp_alive` liveness fallback). Only
+/// meaningful for a directly-connected local subnet — always `None` for a
+/// routed/remote target, since there's no ARP entry to find.
+pub async fn arp_lookup(ip: IpAddr) -> Option<String> {
+    let IpAddr::V4(_) = ip else { return None };
     #[cfg(target_os = "linux")]
     {
-        arp_alive_linux(ip).await
+        arp_lookup_linux(ip).await
     }
     #[cfg(not(target_os = "linux"))]
     {
-        arp_alive_via_command(ip).await
+        arp_lookup_via_command(ip).await
     }
 }
 
 /// Linux: read `/proc/net/arp` directly (no subprocess, no root needed).
 /// Format: `IP address  HW type  Flags  HW address  Mask  Device`, where
 /// the ATF_COM (0x2) bit in Flags means the entry is actually resolved.
+/// Note: Android locks this file down with SELinux even for the shell's own
+/// "root"-looking prompt in apps like Termux — a read failure there is a
+/// platform restriction, not a bug, and just yields `None`.
 #[cfg(target_os = "linux")]
-async fn arp_alive_linux(ip: IpAddr) -> bool {
+async fn arp_lookup_linux(ip: IpAddr) -> Option<String> {
     let target = ip.to_string();
-    let contents = match std::fs::read_to_string("/proc/net/arp") {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-    contents.lines().skip(1).any(|line| {
+    let contents = std::fs::read_to_string("/proc/net/arp").ok()?;
+    contents.lines().skip(1).find_map(|line| {
         let mut cols = line.split_whitespace();
-        let entry_ip = cols.next();
+        let entry_ip = cols.next()?;
         let _hw_type = cols.next();
         let flags = cols.next();
-        if entry_ip != Some(target.as_str()) {
-            return false;
+        let mac = cols.next()?;
+        if entry_ip != target {
+            return None;
         }
         let flags_val = flags
             .and_then(|f| i64::from_str_radix(f.trim_start_matches("0x"), 16).ok())
             .unwrap_or(0);
-        flags_val & 0x2 != 0 // ATF_COM: entry has a resolved MAC address
+        if flags_val & 0x2 != 0 && mac != "00:00:00:00:00:00" {
+            Some(mac.to_ascii_lowercase())
+        } else {
+            None
+        }
     })
 }
 
-/// macOS/BSD fallback: shell out to `arp -n <ip>` and check for a resolved
-/// (non-"incomplete") entry.
+/// macOS/BSD fallback: shell out to `arp -n <ip>` and pull the MAC out of
+/// `? (192.168.1.4) at aa:bb:cc:dd:ee:ff on en0 ...`.
 #[cfg(not(target_os = "linux"))]
-async fn arp_alive_via_command(ip: IpAddr) -> bool {
+async fn arp_lookup_via_command(ip: IpAddr) -> Option<String> {
     let ip_s = ip.to_string();
     let fut = tokio::process::Command::new("arp")
         .args(["-n", &ip_s])
         .kill_on_drop(true)
         .output();
-    match timeout(Duration::from_millis(800), fut).await {
-        Ok(Ok(out)) if out.status.success() => {
-            let text = String::from_utf8_lossy(&out.stdout).to_ascii_lowercase();
-            text.contains(&ip_s) && !text.contains("incomplete") && !text.contains("no match")
-        }
-        _ => false,
+    let out = timeout(Duration::from_millis(800), fut).await.ok()?.ok()?;
+    if !out.status.success() {
+        return None;
     }
+    let text = String::from_utf8_lossy(&out.stdout);
+    text.lines().find_map(|line| {
+        let idx = line.find(" at ")?;
+        let mac = line[idx + 4..].split_whitespace().next()?;
+        if mac.contains(':') && !mac.eq_ignore_ascii_case("incomplete") {
+            Some(mac.to_ascii_lowercase())
+        } else {
+            None
+        }
+    })
 }
 
 // ── SNMP v1 sysDescr.0 probe ────────────────────────────────────────────────

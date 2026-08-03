@@ -218,12 +218,23 @@ async fn run_scan(opts_in: &Options) -> ExitCode {
         && !opts_in.vuln
         && !opts_in.only_open
         && !opts_in.ports_selected
+        && !opts_in.device_detection
+        && !opts_in.mac_info
         && opts_in.output == OutputFormat::Normal;
 
     let mut owned;
     let opts: &Options = if os_focus {
         owned = opts_in.clone();
         owned.ports = ports::os_probe_ports();
+        &owned
+    } else if opts_in.device_detection {
+        // -DP needs a few device-signature ports (e.g. iPhone's 62078) that
+        // aren't in the default top-N list — union them in rather than
+        // replacing whatever port selection the user already made.
+        owned = opts_in.clone();
+        let mut set: std::collections::BTreeSet<u16> = owned.ports.iter().copied().collect();
+        set.extend(ports::DEVICE_PROBE_PORTS.iter().copied());
+        owned.ports = set.into_iter().collect();
         &owned
     } else {
         opts_in

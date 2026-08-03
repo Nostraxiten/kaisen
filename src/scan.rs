@@ -55,6 +55,13 @@ pub struct HostReport {
     /// host answered ICMP echo, or any port answered (open or closed — a
     /// TCP RST is proof of life even if ICMP is filtered).
     pub host_up: bool,
+    /// -MC: MAC address from the OS's own ARP/neighbor cache. Only ever
+    /// resolvable for a directly-connected local subnet (no root, no
+    /// cross-subnet ARP) — None otherwise.
+    pub mac: Option<String>,
+    /// -DP: best-effort device-type guess (phone/console/PC/etc.), empty
+    /// unless -DP was requested.
+    pub device_guess: String,
 }
 
 /// Expand a target string into concrete IPs. Supports hostname, IPv4/IPv6, and
@@ -222,6 +229,8 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
             filtered_count: 0,
             probes: None,
             host_up: false,
+            mac: None,
+            device_guess: String::new(),
         };
     }
 
@@ -259,8 +268,16 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
     let filtered_count = reports.iter().filter(|r| r.state == State::Filtered).count();
     let host_up = true;
 
+    // -MC: MAC address from the OS's own ARP/neighbor cache (cheap local
+    // lookup, no network round-trip beyond what the probes above already did).
+    let mac = if opts.mac_info {
+        crate::osfp::arp_lookup(ip).await
+    } else {
+        None
+    };
+
     // Phase 2: service/version detection on open ports (bounded concurrency).
-    if opts.service_detection || opts.vuln || opts.os_detection {
+    if opts.service_detection || opts.vuln || opts.os_detection || opts.device_detection {
         let open_ports: Vec<u16> = reports
             .iter()
             .filter(|r| r.state == State::Open)
@@ -291,9 +308,10 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
         }
     }
 
-    // Phase 3: network-level OS probes (TTL via ping, SNMP sysDescr) — only in
-    // OS-detection mode, run best-effort and unprivileged.
-    let probes = if opts.os_detection {
+    // Phase 3: network-level OS probes (TTL via ping, SNMP sysDescr) — needed
+    // for OS detection and as a signal for device-type guessing, best-effort
+    // and unprivileged.
+    let probes = if opts.os_detection || opts.device_detection {
         Some(crate::osfp::probe(ip).await)
     } else {
         None
@@ -310,12 +328,21 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
         filtered_count,
         probes,
         host_up,
+        mac,
+        device_guess: String::new(),
     };
 
     // Phase 4: combine every signal into a single OS guess string.
     if opts.os_detection {
         let (os, _conf, _role, _signals) = infer_os(&report);
         report.os_guess = os;
+    }
+
+    // Phase 5 (-DP): best-effort device-type guess, layered on the same
+    // TTL/banner/port signals plus a few device-specific ports.
+    if opts.device_detection {
+        let (device, _conf, _signals) = infer_device(&report);
+        report.device_guess = device;
     }
 
     report
@@ -427,6 +454,60 @@ fn infer_os(report: &HostReport) -> (String, &'static str, String, Vec<String>) 
         return ("unknown".into(), "none", role, signals);
     }
     ("unknown".into(), "low", role, signals)
+}
+
+/// -DP: guess a *consumer device type* rather than just an OS family — a
+/// phone, a games console, a PC. No single unprivileged signal proves a
+/// device model (that needs root-level raw fingerprinting against a huge
+/// signature database, which is what `nmap -O` actually does); this layers
+/// a handful of well-known device-specific ports on top of the TTL family
+/// already gathered for `-OS`, and is honest with "unknown" when nothing
+/// distinctive showed up. Notably: game consoles other than Xbox/PlayStation
+/// (e.g. Nintendo Switch) don't have a reliable unprivileged TCP signature,
+/// so they generally fall through to "unknown" here.
+fn infer_device(report: &HostReport) -> (String, &'static str, Vec<String>) {
+    let open_ports: Vec<u16> = report
+        .ports
+        .iter()
+        .filter(|r| r.state == State::Open)
+        .map(|r| r.port)
+        .collect();
+    let has = |p: u16| open_ports.contains(&p);
+    let ttl_family = report.probes.as_ref().and_then(|p| p.ttl_family);
+    let is_windows_ttl = matches!(ttl_family, Some(f) if f.starts_with("Windows"));
+    let is_unix_ttl = matches!(ttl_family, Some(f) if f.starts_with("Linux"));
+    let mut signals = Vec::new();
+
+    if has(62078) {
+        signals.push("62078/tcp open (lockdownd) — Apple mobile-device sync service".to_string());
+        return ("iPhone / iPad (iOS)".to_string(), "high", signals);
+    }
+    if has(548) {
+        signals.push("548/tcp open (AFP) — Apple file sharing".to_string());
+        return ("Mac (macOS)".to_string(), "medium", signals);
+    }
+    if has(3074) && is_windows_ttl {
+        signals.push("3074/tcp open (Xbox Live), TTL matches Windows family".to_string());
+        return ("Xbox".to_string(), "medium", signals);
+    }
+    if open_ports.iter().any(|p| (3478..=3480).contains(p)) {
+        signals.push("3478-3480/tcp open — commonly PlayStation Network".to_string());
+        return ("PlayStation (heuristic)".to_string(), "low", signals);
+    }
+    if has(5555) && is_unix_ttl {
+        signals.push("5555/tcp open — commonly Android ADB".to_string());
+        return ("Android (heuristic)".to_string(), "low", signals);
+    }
+    if has(3389) || has(445) || has(139) || has(135) || is_windows_ttl {
+        return ("Windows PC".to_string(), "low", signals);
+    }
+    if is_unix_ttl {
+        return ("Linux / Android host (unix TTL, no distinguishing port)".to_string(), "low", signals);
+    }
+    if ttl_family.is_some() {
+        return ("Network device / BSD / Solaris".to_string(), "low", signals);
+    }
+    ("unknown".to_string(), "none", signals)
 }
 
 fn describe_role(ports: &[u16]) -> String {
@@ -600,6 +681,17 @@ fn print_normal(report: &HostReport, opts: &Options) {
         report.elapsed.as_secs_f64()
     );
 
+    if opts.mac_info {
+        match &report.mac {
+            Some(mac) => println!("{:<14}{}", p.bold("MAC:"), mac),
+            None => println!(
+                "{:<14}{}",
+                p.bold("MAC:"),
+                p.dim("unknown (not on this local subnet, or ARP cache unavailable)")
+            ),
+        }
+    }
+
     let open_only: Vec<&PortReport> =
         report.ports.iter().filter(|r| r.state == State::Open).collect();
 
@@ -699,6 +791,10 @@ fn print_normal(report: &HostReport, opts: &Options) {
 
     if opts.os_detection {
         println!("{} {}", p.bold("OS guess:"), report.os_guess);
+    }
+
+    if opts.device_detection {
+        println!("{} {}", p.bold("Device guess:"), report.device_guess);
     }
 
     if opts.vuln {
