@@ -54,7 +54,9 @@ pub async fn detect(addr: SocketAddr, default_name: &str, timeout_ms: u64) -> Se
     // Some services speak first (SSH, FTP, SMTP, POP3, IMAP). Others (HTTP)
     // wait for a request. Decide a probe by port.
     let probe: Option<&[u8]> = match port {
-        80 | 8080 | 8000 | 8008 | 8888 | 81 | 82 | 591 | 8081 | 8443 | 443 | 9080 | 9090 => {
+        // 8060 = Roku's ECP, a genuine HTTP endpoint that replies to GET /
+        // with an XML device-info blob naming the product.
+        80 | 8080 | 8000 | 8008 | 8888 | 81 | 82 | 591 | 8081 | 8443 | 443 | 9080 | 9090 | 8060 => {
             Some(b"GET / HTTP/1.0\r\nHost: kaisen\r\nUser-Agent: Kaisen\r\n\r\n")
         }
         6379 => Some(b"INFO\r\n"),          // redis

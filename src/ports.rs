@@ -288,4 +288,4 @@ pub fn os_probe_ports() -> Vec<u16> {
 /// list (62078/lockdownd for iPhones is a good example — high-signal, but
 /// obscure enough that general port-popularity ranking buries it). `-DP`
 /// unions these into whatever port set is already selected.
-pub const DEVICE_PROBE_PORTS: &[u16] = &[62078, 3074, 3478, 3479, 3480, 548, 5555];
+pub const DEVICE_PROBE_PORTS: &[u16] = &[62078, 3074, 3478, 3479, 3480, 548, 5555, 8060];

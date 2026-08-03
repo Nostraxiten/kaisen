@@ -62,6 +62,8 @@ pub struct HostReport {
     /// -DP: best-effort device-type guess (phone/console/PC/etc.), empty
     /// unless -DP was requested.
     pub device_guess: String,
+    pub device_confidence: &'static str,
+    pub device_signals: Vec<String>,
 }
 
 /// Expand a target string into concrete IPs. Supports hostname, IPv4/IPv6, and
@@ -231,6 +233,8 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
             host_up: false,
             mac: None,
             device_guess: String::new(),
+            device_confidence: "none",
+            device_signals: Vec::new(),
         };
     }
 
@@ -330,6 +334,8 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
         host_up,
         mac,
         device_guess: String::new(),
+        device_confidence: "none",
+        device_signals: Vec::new(),
     };
 
     // Phase 4: combine every signal into a single OS guess string.
@@ -341,8 +347,10 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
     // Phase 5 (-DP): best-effort device-type guess, layered on the same
     // TTL/banner/port signals plus a few device-specific ports.
     if opts.device_detection {
-        let (device, _conf, _signals) = infer_device(&report);
+        let (device, conf, signals) = infer_device(&report);
         report.device_guess = device;
+        report.device_confidence = conf;
+        report.device_signals = signals;
     }
 
     report
@@ -456,15 +464,17 @@ fn infer_os(report: &HostReport) -> (String, &'static str, String, Vec<String>) 
     ("unknown".into(), "low", role, signals)
 }
 
-/// -DP: guess a *consumer device type* rather than just an OS family — a
-/// phone, a games console, a PC. No single unprivileged signal proves a
-/// device model (that needs root-level raw fingerprinting against a huge
-/// signature database, which is what `nmap -O` actually does); this layers
-/// a handful of well-known device-specific ports on top of the TTL family
+/// -DP: guess a *consumer/IoT device type* rather than just an OS family —
+/// phone, camera, TV, console, printer, router, NAS, etc. No single
+/// unprivileged signal proves a device model (real fingerprinting needs
+/// root-level raw TCP/IP probing against a huge signature database, which is
+/// what `nmap -O` actually does); this layers known device ports *and*
+/// banner keywords (checked strongest-first) on top of the TTL family
 /// already gathered for `-OS`, and is honest with "unknown" when nothing
-/// distinctive showed up. Notably: game consoles other than Xbox/PlayStation
-/// (e.g. Nintendo Switch) don't have a reliable unprivileged TCP signature,
-/// so they generally fall through to "unknown" here.
+/// distinctive showed up. Some categories genuinely have no unprivileged TCP
+/// signature at all — most smartwatches/wearables only talk to their paired
+/// phone over Bluetooth and never appear as an independent LAN service, so
+/// Kaisen can't name them; same for Nintendo Switch among consoles.
 fn infer_device(report: &HostReport) -> (String, &'static str, Vec<String>) {
     let open_ports: Vec<u16> = report
         .ports
@@ -476,8 +486,48 @@ fn infer_device(report: &HostReport) -> (String, &'static str, Vec<String>) {
     let ttl_family = report.probes.as_ref().and_then(|p| p.ttl_family);
     let is_windows_ttl = matches!(ttl_family, Some(f) if f.starts_with("Windows"));
     let is_unix_ttl = matches!(ttl_family, Some(f) if f.starts_with("Linux"));
+
+    // Every open port's banner/product/extra text, lowercased, for keyword
+    // matching — the strongest signal available without root, when a device
+    // happens to expose one (e.g. an HTTP `Server:` header).
+    let mut banner = String::new();
+    for r in &report.ports {
+        if r.state == State::Open {
+            if let Some(svc) = &r.service {
+                banner.push_str(&svc.product);
+                banner.push(' ');
+                banner.push_str(&svc.banner);
+                banner.push(' ');
+                banner.push_str(&svc.extra);
+                banner.push(' ');
+            }
+        }
+    }
+    let banner = banner.to_ascii_lowercase();
+    let has_banner = |needle: &str| banner.contains(needle);
     let mut signals = Vec::new();
 
+    // ── Strongest: a banner naming the actual product ────────────────────
+    let banner_matches: &[(&str, &str)] = &[
+        ("hikvision", "IP Camera / DVR (Hikvision)"),
+        ("dahua", "IP Camera / DVR (Dahua)"),
+        ("nrdp", "Smart TV / streaming device (Roku/NRDP)"),
+        ("roku", "Smart TV / streaming device (Roku)"),
+        ("sonos", "Sonos speaker"),
+        ("synology", "Synology NAS"),
+        ("qnap", "QNAP NAS"),
+        ("unifi", "Ubiquiti network device (AP/switch/gateway)"),
+        ("ubiquiti", "Ubiquiti network device (AP/switch/gateway)"),
+        ("airplay", "Apple AirPlay receiver (TV/speaker)"),
+    ];
+    for (needle, label) in banner_matches {
+        if has_banner(needle) {
+            signals.push(format!("service banner mentions \"{needle}\""));
+            return (label.to_string(), "high", signals);
+        }
+    }
+
+    // ── Apple mobile / desktop: high-signal ports ─────────────────────────
     if has(62078) {
         signals.push("62078/tcp open (lockdownd) — Apple mobile-device sync service".to_string());
         return ("iPhone / iPad (iOS)".to_string(), "high", signals);
@@ -486,6 +536,24 @@ fn infer_device(report: &HostReport) -> (String, &'static str, Vec<String>) {
         signals.push("548/tcp open (AFP) — Apple file sharing".to_string());
         return ("Mac (macOS)".to_string(), "medium", signals);
     }
+
+    // ── Media / casting devices ────────────────────────────────────────────
+    if has(8008) || has(8009) {
+        signals.push("8008-8009/tcp open — Google Cast protocol".to_string());
+        return ("Chromecast / Google Cast device (TV, speaker or Android TV)".to_string(), "medium", signals);
+    }
+    if has(8060) {
+        signals.push("8060/tcp open — Roku External Control Protocol".to_string());
+        return ("Roku".to_string(), "medium", signals);
+    }
+
+    // ── IP cameras / DVRs ───────────────────────────────────────────────────
+    if has(554) {
+        signals.push("554/tcp open (RTSP) — video streaming, typical of IP cameras/DVRs".to_string());
+        return ("IP Camera / DVR (RTSP)".to_string(), "medium", signals);
+    }
+
+    // ── Consoles ────────────────────────────────────────────────────────────
     if has(3074) && is_windows_ttl {
         signals.push("3074/tcp open (Xbox Live), TTL matches Windows family".to_string());
         return ("Xbox".to_string(), "medium", signals);
@@ -494,15 +562,35 @@ fn infer_device(report: &HostReport) -> (String, &'static str, Vec<String>) {
         signals.push("3478-3480/tcp open — commonly PlayStation Network".to_string());
         return ("PlayStation (heuristic)".to_string(), "low", signals);
     }
+
+    // ── Printers ────────────────────────────────────────────────────────────
+    if has(9100) || has(631) {
+        signals.push("9100/tcp (JetDirect) or 631/tcp (IPP) open".to_string());
+        return ("Network printer".to_string(), "medium", signals);
+    }
+
+    // ── Router / gateway: DNS + a web admin UI on the same box ────────────
+    if has(53) && (has(80) || has(443)) {
+        signals.push("53/tcp + 80/443 open — DNS + web admin UI, typical of a router/gateway".to_string());
+        return ("Router / gateway".to_string(), "medium", signals);
+    }
+
+    // ── Android (weak signal: ADB left open) ───────────────────────────────
     if has(5555) && is_unix_ttl {
         signals.push("5555/tcp open — commonly Android ADB".to_string());
         return ("Android (heuristic)".to_string(), "low", signals);
     }
+
+    // ── Generic OS-family fallback ──────────────────────────────────────────
     if has(3389) || has(445) || has(139) || has(135) || is_windows_ttl {
         return ("Windows PC".to_string(), "low", signals);
     }
     if is_unix_ttl {
-        return ("Linux / Android host (unix TTL, no distinguishing port)".to_string(), "low", signals);
+        return (
+            "Linux / Android / IoT host (unix TTL, no distinguishing port or banner)".to_string(),
+            "low",
+            signals,
+        );
     }
     if ttl_family.is_some() {
         return ("Network device / BSD / Solaris".to_string(), "low", signals);
@@ -794,7 +882,23 @@ fn print_normal(report: &HostReport, opts: &Options) {
     }
 
     if opts.device_detection {
-        println!("{} {}", p.bold("Device guess:"), report.device_guess);
+        let conf_note = match report.device_confidence {
+            "high" => "",
+            "medium" => " (medium confidence)",
+            "low" => " (low confidence)",
+            _ => "",
+        };
+        println!(
+            "{} {}{}",
+            p.bold("Device guess:"),
+            report.device_guess,
+            p.dim(conf_note)
+        );
+        if opts.verbosity >= 1 {
+            for s in &report.device_signals {
+                println!("    {}", p.dim(s));
+            }
+        }
     }
 
     if opts.vuln {
