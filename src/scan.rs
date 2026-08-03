@@ -196,7 +196,15 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options) -> HostReport {
     let closed_count = reports.iter().filter(|r| r.state == State::Closed).count();
     let filtered_count = reports.iter().filter(|r| r.state == State::Filtered).count();
 
-    let host_up = opts.no_ping || ping_ttl.is_some() || open_count > 0 || closed_count > 0;
+    let mut host_up = opts.no_ping || ping_ttl.is_some() || open_count > 0 || closed_count > 0;
+
+    if !host_up {
+        // Last resort: on a local subnet, a host can silently drop every
+        // ping and every TCP probe at the OS firewall and still be up — the
+        // port scan above already forced the kernel to try resolving its MAC
+        // address, so check whether that resolution actually succeeded.
+        host_up = crate::osfp::arp_alive(ip).await;
+    }
 
     if !host_up {
         // Confirmed down (or unreachable/firewalled with zero signal): don't

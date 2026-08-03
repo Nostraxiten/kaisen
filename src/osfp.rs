@@ -89,6 +89,74 @@ fn parse_ttl(s: &str) -> Option<u8> {
     num.parse().ok()
 }
 
+// ── ARP/neighbor-cache liveness (local-subnet fallback) ────────────────────
+//
+// On a LAN, a host can drop every ICMP echo and every TCP probe at the OS
+// firewall level and still be "up" — because ARP resolution happens in the
+// kernel below any of that filtering, the same reason `nmap` prefers ARP
+// over ping for local targets. We can't send raw ARP requests without root,
+// but we don't have to: probing the host's TCP ports already forces the
+// kernel to resolve its MAC address as a side effect, so afterwards we just
+// read back that resolution from the OS's own neighbor/ARP cache.
+
+/// Ask the OS whether it holds a *resolved* (not just attempted) ARP/neighbor
+/// entry for `ip`, meaning the device answered at layer 2 regardless of
+/// whether anything above that responded.
+pub async fn arp_alive(ip: IpAddr) -> bool {
+    let IpAddr::V4(_) = ip else { return false };
+    #[cfg(target_os = "linux")]
+    {
+        arp_alive_linux(ip).await
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        arp_alive_via_command(ip).await
+    }
+}
+
+/// Linux: read `/proc/net/arp` directly (no subprocess, no root needed).
+/// Format: `IP address  HW type  Flags  HW address  Mask  Device`, where
+/// the ATF_COM (0x2) bit in Flags means the entry is actually resolved.
+#[cfg(target_os = "linux")]
+async fn arp_alive_linux(ip: IpAddr) -> bool {
+    let target = ip.to_string();
+    let contents = match std::fs::read_to_string("/proc/net/arp") {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    contents.lines().skip(1).any(|line| {
+        let mut cols = line.split_whitespace();
+        let entry_ip = cols.next();
+        let _hw_type = cols.next();
+        let flags = cols.next();
+        if entry_ip != Some(target.as_str()) {
+            return false;
+        }
+        let flags_val = flags
+            .and_then(|f| i64::from_str_radix(f.trim_start_matches("0x"), 16).ok())
+            .unwrap_or(0);
+        flags_val & 0x2 != 0 // ATF_COM: entry has a resolved MAC address
+    })
+}
+
+/// macOS/BSD fallback: shell out to `arp -n <ip>` and check for a resolved
+/// (non-"incomplete") entry.
+#[cfg(not(target_os = "linux"))]
+async fn arp_alive_via_command(ip: IpAddr) -> bool {
+    let ip_s = ip.to_string();
+    let fut = tokio::process::Command::new("arp")
+        .args(["-n", &ip_s])
+        .kill_on_drop(true)
+        .output();
+    match timeout(Duration::from_millis(800), fut).await {
+        Ok(Ok(out)) if out.status.success() => {
+            let text = String::from_utf8_lossy(&out.stdout).to_ascii_lowercase();
+            text.contains(&ip_s) && !text.contains("incomplete") && !text.contains("no match")
+        }
+        _ => false,
+    }
+}
+
 // ── SNMP v1 sysDescr.0 probe ────────────────────────────────────────────────
 
 /// The BER-encoded OID for 1.3.6.1.2.1.1.1.0 (sysDescr.0), value bytes only.
