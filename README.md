@@ -111,7 +111,7 @@ kaisen -x 1.1.1.1            # reverse lookup
 ### Host discovery
 | Flag | Meaning |
 |------|---------|
-| `-Pn` / `--no-ping` | Treat hosts as up (default — ICMP needs root) |
+| `-Pn` / `--no-ping` | Skip discovery, treat hosts as up (default: unprivileged ICMP ping; a host also counts as up if any port responds) |
 
 ### Timing & performance
 | Flag | Meaning |
@@ -238,7 +238,7 @@ so they don't pollute redirected results.
 | Service/version `-sV` | ✅ banner + probes | ✅ |
 | DNS / `dig` | ✅ full | ✅ |
 | OS detection `-OS` | ✅ multi-signal (TTL + SNMP + banners), see below | (TCP/IP fingerprint — roadmap) |
-| ICMP ping discovery | ↩︎ skipped (acts like `-Pn`) | (roadmap) |
+| ICMP ping discovery | ✅ via the system `ping` binary (unprivileged) | ✅ |
 
 Kaisen is honest about these limits at runtime rather than silently doing less.
 

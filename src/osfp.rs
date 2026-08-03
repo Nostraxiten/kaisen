@@ -50,8 +50,9 @@ pub fn ttl_family(ttl: u8) -> (&'static str, u8) {
 
 /// Get the reply TTL by shelling out to the unprivileged `ping` utility.
 /// Handles Linux/Termux (`-W`) and macOS/BSD (`-t`) flag differences, plus the
-/// Windows `TTL=` spelling.
-async fn ttl_via_ping(ip: IpAddr) -> Option<u8> {
+/// Windows `TTL=` spelling. Also used as the unprivileged host-discovery probe
+/// (`Some(_)` means the host answered ICMP echo, i.e. it's up).
+pub async fn ttl_via_ping(ip: IpAddr) -> Option<u8> {
     let ip_s = ip.to_string();
     let arg_sets: [&[&str]; 3] = [
         &["-c", "1", "-W", "1"],  // Linux / Termux

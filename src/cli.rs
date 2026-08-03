@@ -81,7 +81,7 @@ pub struct Options {
     pub vuln: bool,
     pub only_open: bool,
     pub reason: bool,
-    pub no_ping: bool, // -Pn (default true; we can't ICMP without root)
+    pub no_ping: bool, // -Pn: skip host discovery, assume every target is up
     pub timing: Timing,
     pub ip_version: IpVersion,
     pub verbosity: u8,
@@ -119,7 +119,7 @@ impl Default for Options {
             vuln: false,
             only_open: false,
             reason: false,
-            no_ping: true,
+            no_ping: false,
             timing: Timing::from_template(3),
             ip_version: IpVersion::Any,
             verbosity: 0,
@@ -408,7 +408,10 @@ USAGE:
     -A,  --aggressive      Enable -sV, -OS and -vuln together
 
   ── HOST DISCOVERY ─────────────────────────────────────────────────────────
-    -Pn, --no-ping         Treat hosts as online, skip discovery (default: no root)
+    -Pn, --no-ping         Skip discovery, treat every target as online.
+                           Default: probe with an unprivileged ICMP ping;
+                           a host also counts as up if any port answers
+                           (open or closed) even when ICMP is filtered.
 
   ── TIMING & PERFORMANCE ───────────────────────────────────────────────────
     -T0 .. -T5             Timing template: 0=paranoid .. 3=normal .. 5=insane

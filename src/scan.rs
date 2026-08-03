@@ -51,6 +51,10 @@ pub struct HostReport {
     pub closed_count: usize,
     pub filtered_count: usize,
     pub probes: Option<crate::osfp::Probes>,
+    /// Host discovery result. Always true under -Pn. Otherwise true when the
+    /// host answered ICMP echo, or any port answered (open or closed — a
+    /// TCP RST is proof of life even if ICMP is filtered).
+    pub host_up: bool,
 }
 
 /// Expand a target string into concrete IPs. Supports hostname, IPv4/IPv6, and
@@ -155,15 +159,26 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options) -> HostReport {
     let retries = opts.timing.retries;
     let concurrency = opts.timing.concurrency.max(1);
 
-    // Phase 1: connectivity scan.
-    let results: Vec<(u16, State, &'static str)> = stream::iter(ports.into_iter())
+    // Phase 1: connectivity scan, plus an unprivileged ICMP host-discovery
+    // probe run concurrently (unless -Pn asked us to skip it and just assume
+    // every target is up).
+    let port_scan = stream::iter(ports.into_iter())
         .map(|port| async move {
             let (state, reason) = probe_port(ip, port, timeout_ms, retries).await;
             (port, state, reason)
         })
         .buffer_unordered(concurrency)
-        .collect()
-        .await;
+        .collect::<Vec<(u16, State, &'static str)>>();
+
+    let ping = async {
+        if opts.no_ping {
+            None
+        } else {
+            crate::osfp::ttl_via_ping(ip).await
+        }
+    };
+
+    let (results, ping_ttl) = tokio::join!(port_scan, ping);
 
     let mut reports: Vec<PortReport> = results
         .into_iter()
@@ -180,6 +195,25 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options) -> HostReport {
     let open_count = reports.iter().filter(|r| r.state == State::Open).count();
     let closed_count = reports.iter().filter(|r| r.state == State::Closed).count();
     let filtered_count = reports.iter().filter(|r| r.state == State::Filtered).count();
+
+    let host_up = opts.no_ping || ping_ttl.is_some() || open_count > 0 || closed_count > 0;
+
+    if !host_up {
+        // Confirmed down (or unreachable/firewalled with zero signal): don't
+        // waste time on service/OS probes that can't possibly answer.
+        return HostReport {
+            target: target.to_string(),
+            ip,
+            ports: reports,
+            os_guess: String::new(),
+            elapsed: start.elapsed(),
+            open_count,
+            closed_count,
+            filtered_count,
+            probes: None,
+            host_up,
+        };
+    }
 
     // Phase 2: service/version detection on open ports (bounded concurrency).
     if opts.service_detection || opts.vuln || opts.os_detection {
@@ -231,6 +265,7 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options) -> HostReport {
         closed_count,
         filtered_count,
         probes,
+        host_up,
     };
 
     // Phase 4: combine every signal into a single OS guess string.
@@ -395,6 +430,13 @@ pub fn print_os_report(report: &HostReport, opts: &Options) {
         p.cyan(&report.target),
         report.ip
     );
+    if !report.host_up {
+        println!(
+            "{}",
+            p.yellow("Note: Host seems down. If it is really up, but blocking our probes, try -Pn.")
+        );
+        return;
+    }
     println!(
         "Host is up. Probed {} port(s) in {:.2}s.",
         report.ports.len(),
@@ -480,6 +522,13 @@ fn print_normal(report: &HostReport, opts: &Options) {
         p.cyan(&report.target),
         report.ip
     );
+    if !report.host_up {
+        println!(
+            "{}",
+            p.yellow("Note: Host seems down. If it is really up, but blocking our probes, try -Pn.")
+        );
+        return;
+    }
     println!(
         "Host is up. Scanned {} port(s) in {:.2}s.",
         report.ports.len(),
@@ -598,6 +647,10 @@ fn print_normal(report: &HostReport, opts: &Options) {
 }
 
 fn print_grepable(report: &HostReport) {
+    if !report.host_up {
+        println!("Host: {} ({})\tStatus: Down", report.ip, report.target);
+        return;
+    }
     let mut ports = String::new();
     for r in report.ports.iter().filter(|r| r.state == State::Open) {
         let svc = r
@@ -617,6 +670,15 @@ fn print_grepable(report: &HostReport) {
 }
 
 fn print_json(report: &HostReport, opts: &Options) {
+    if !report.host_up {
+        println!(
+            "{{\"target\":\"{}\",\"ip\":\"{}\",\"host_up\":false,\"os_guess\":\"\",\"elapsed_s\":{:.3},\"ports\":[]}}",
+            json_escape(&report.target),
+            report.ip,
+            report.elapsed.as_secs_f64()
+        );
+        return;
+    }
     let mut ports_json = Vec::new();
     for r in &report.ports {
         // Closed ports are never emitted; with --open, only open ports are.
@@ -647,7 +709,7 @@ fn print_json(report: &HostReport, opts: &Options) {
         ));
     }
     println!(
-        "{{\"target\":\"{}\",\"ip\":\"{}\",\"os_guess\":\"{}\",\"elapsed_s\":{:.3},\"ports\":[{}]}}",
+        "{{\"target\":\"{}\",\"ip\":\"{}\",\"host_up\":true,\"os_guess\":\"{}\",\"elapsed_s\":{:.3},\"ports\":[{}]}}",
         json_escape(&report.target),
         report.ip,
         json_escape(&report.os_guess),
