@@ -80,6 +80,30 @@ pub async fn ttl_via_ping(ip: IpAddr) -> Option<u8> {
     None
 }
 
+/// Single-attempt, ~1s ICMP ping for the fast discovery sweep that runs
+/// concurrently across every target before the real port scan. Unlike
+/// `ttl_via_ping` (used for one host's detailed `-OS` probe), this tries
+/// only the current platform's flag convention and doesn't retry across
+/// conventions — it's meant to run hundreds-wide in parallel, not tuned for
+/// a single host.
+pub async fn ping_quick(ip: IpAddr) -> bool {
+    let ip_s = ip.to_string();
+    #[cfg(target_os = "windows")]
+    let args: [&str; 4] = ["-n", "1", "-w", "800"];
+    #[cfg(target_os = "macos")]
+    let args: [&str; 4] = ["-c", "1", "-t", "1"];
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let args: [&str; 4] = ["-c", "1", "-W", "1"];
+
+    let mut full_args: Vec<&str> = args.to_vec();
+    full_args.push(&ip_s);
+    let fut = tokio::process::Command::new("ping")
+        .args(&full_args)
+        .kill_on_drop(true)
+        .output();
+    matches!(timeout(Duration::from_millis(1500), fut).await, Ok(Ok(out)) if out.status.success())
+}
+
 /// Extract "ttl=NN" (any case; Windows uses "TTL=") from ping output.
 fn parse_ttl(s: &str) -> Option<u8> {
     let lower = s.to_ascii_lowercase();

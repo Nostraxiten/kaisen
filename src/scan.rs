@@ -151,34 +151,96 @@ async fn probe_port(ip: IpAddr, port: u16, timeout_ms: u64, retries: u32) -> (St
     }
 }
 
-/// Scan one host across the given ports.
-pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options) -> HostReport {
+/// Small, fixed port set for the fast discovery sweep — mirrors nmap's
+/// default host-discovery probes (SYN/ACK-equivalent to 80 and 443), kept
+/// short so it stays cheap even run against hundreds of hosts at once.
+const DISCOVERY_PORTS: [u16; 2] = [80, 443];
+const DISCOVERY_TCP_TIMEOUT_MS: u64 = 400;
+
+/// Is this host worth a full port scan? Ping plus a couple of common ports,
+/// and — if both of those come back empty — a check of whatever the OS's
+/// own ARP/neighbor cache already knows (populated as a side effect of the
+/// probes above, on platforms where it's readable without root).
+async fn quick_alive(ip: IpAddr) -> bool {
+    let ping = crate::osfp::ping_quick(ip);
+    let tcp = async {
+        for port in DISCOVERY_PORTS {
+            let (state, _) = probe_port(ip, port, DISCOVERY_TCP_TIMEOUT_MS, 0).await;
+            if state != State::Filtered {
+                return true;
+            }
+        }
+        false
+    };
+    let (ping_ok, tcp_ok) = tokio::join!(ping, tcp);
+    if ping_ok || tcp_ok {
+        return true;
+    }
+    crate::osfp::arp_alive(ip).await
+}
+
+/// Fast parallel liveness sweep across *every* target before the expensive
+/// full port scan — the same two-phase shape `nmap` uses: hit everyone with
+/// a quick ping + a couple of common ports at once, then only fully scan
+/// whoever answered, instead of running the full port list against hosts
+/// that were never going to respond. Skipped entirely under -Pn, where
+/// every host is simply assumed up.
+pub async fn discover_alive(hosts: &[(String, IpAddr)], opts: &Options) -> Vec<bool> {
+    if opts.no_ping {
+        return vec![true; hosts.len()];
+    }
+    let conc = opts.timing.concurrency.max(1);
+    let mut results: Vec<(usize, bool)> = stream::iter(hosts.iter().enumerate())
+        .map(|(idx, (_, ip))| {
+            let ip = *ip;
+            async move { (idx, quick_alive(ip).await) }
+        })
+        .buffer_unordered(conc)
+        .collect()
+        .await;
+    results.sort_by_key(|(idx, _)| *idx);
+    results.into_iter().map(|(_, alive)| alive).collect()
+}
+
+/// Scan one host across the given ports. `known_alive` comes from the
+/// discovery sweep (`discover_alive`) run once up front for the whole
+/// target list; when it's false (and -Pn wasn't given) we skip the full
+/// port scan entirely rather than running it against a host that already
+/// failed to answer anything.
+pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bool) -> HostReport {
     let start = Instant::now();
+
+    if !opts.no_ping && !known_alive {
+        return HostReport {
+            target: target.to_string(),
+            ip,
+            ports: Vec::new(),
+            os_guess: String::new(),
+            elapsed: start.elapsed(),
+            open_count: 0,
+            closed_count: 0,
+            filtered_count: 0,
+            probes: None,
+            host_up: false,
+        };
+    }
+
     let ports = opts.ports.clone();
     let timeout_ms = opts.timing.connect_timeout_ms;
     let retries = opts.timing.retries;
     let concurrency = opts.timing.concurrency.max(1);
 
-    // Phase 1: connectivity scan, plus an unprivileged ICMP host-discovery
-    // probe run concurrently (unless -Pn asked us to skip it and just assume
-    // every target is up).
-    let port_scan = stream::iter(ports.into_iter())
+    // Phase 1: full connectivity scan. Liveness is already established at
+    // this point (the discovery sweep confirmed it, or -Pn assumes it), so
+    // there's no need to ping again here.
+    let results: Vec<(u16, State, &'static str)> = stream::iter(ports.into_iter())
         .map(|port| async move {
             let (state, reason) = probe_port(ip, port, timeout_ms, retries).await;
             (port, state, reason)
         })
         .buffer_unordered(concurrency)
-        .collect::<Vec<(u16, State, &'static str)>>();
-
-    let ping = async {
-        if opts.no_ping {
-            None
-        } else {
-            crate::osfp::ttl_via_ping(ip).await
-        }
-    };
-
-    let (results, ping_ttl) = tokio::join!(port_scan, ping);
+        .collect()
+        .await;
 
     let mut reports: Vec<PortReport> = results
         .into_iter()
@@ -195,33 +257,7 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options) -> HostReport {
     let open_count = reports.iter().filter(|r| r.state == State::Open).count();
     let closed_count = reports.iter().filter(|r| r.state == State::Closed).count();
     let filtered_count = reports.iter().filter(|r| r.state == State::Filtered).count();
-
-    let mut host_up = opts.no_ping || ping_ttl.is_some() || open_count > 0 || closed_count > 0;
-
-    if !host_up {
-        // Last resort: on a local subnet, a host can silently drop every
-        // ping and every TCP probe at the OS firewall and still be up — the
-        // port scan above already forced the kernel to try resolving its MAC
-        // address, so check whether that resolution actually succeeded.
-        host_up = crate::osfp::arp_alive(ip).await;
-    }
-
-    if !host_up {
-        // Confirmed down (or unreachable/firewalled with zero signal): don't
-        // waste time on service/OS probes that can't possibly answer.
-        return HostReport {
-            target: target.to_string(),
-            ip,
-            ports: reports,
-            os_guess: String::new(),
-            elapsed: start.elapsed(),
-            open_count,
-            closed_count,
-            filtered_count,
-            probes: None,
-            host_up,
-        };
-    }
+    let host_up = true;
 
     // Phase 2: service/version detection on open ports (bounded concurrency).
     if opts.service_detection || opts.vuln || opts.os_detection {

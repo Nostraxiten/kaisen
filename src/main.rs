@@ -280,11 +280,17 @@ async fn run_scan(opts_in: &Options) -> ExitCode {
     let mut any_open = false;
     let mut up_count = 0usize;
     let sweep_start = Instant::now();
+
+    // Fast liveness sweep across every target at once (ping + a couple of
+    // common ports), the same shape nmap uses — so the expensive full port
+    // scan below only runs against hosts that actually answered something.
+    let alive = scan::discover_alive(&hosts, opts).await;
+
     for (idx, (target, ip)) in hosts.into_iter().enumerate() {
         if idx > 0 && opts.timing.host_delay_ms > 0 {
             tokio::time::sleep(std::time::Duration::from_millis(opts.timing.host_delay_ms)).await;
         }
-        let report = scan::scan_host(&target, ip, opts).await;
+        let report = scan::scan_host(&target, ip, opts, alive[idx]).await;
         if report.host_up {
             up_count += 1;
         }
