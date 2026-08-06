@@ -97,15 +97,32 @@ BIN="$SRC_DIR/target/release/kaisen"
 [ -x "$BIN" ] || { err "build did not produce $BIN"; exit 1; }
 
 # ---------------------------------------------------------------------------
-# 5. Choose an install directory on PATH (prefer user-writable, no root)
+# 5. Choose an install directory: prefer whatever is ALREADY on PATH (so the
+#    install "just works" with no shell restart / profile edit needed), and
+#    only fall back to creating a fresh, not-yet-on-PATH directory as a last
+#    resort. On Kali (and most distros) a root shell already has
+#    /usr/local/bin on PATH, so a root install lands there directly instead
+#    of ~/.local/bin, which usually isn't on PATH out of the box.
 # ---------------------------------------------------------------------------
 choose_bindir() {
     if [ "$IS_TERMUX" -eq 1 ]; then
         echo "$PREFIX/bin"; return
     fi
-    for d in "$HOME/.local/bin" "$HOME/bin"; do
-        case ":$PATH:" in *":$d:"*) mkdir -p "$d" && [ -w "$d" ] && { echo "$d"; return; };; esac
+    for d in "$HOME/.local/bin" "$HOME/bin" "/usr/local/bin"; do
+        case ":$PATH:" in
+            *":$d:"*)
+                mkdir -p "$d" 2>/dev/null
+                [ -w "$d" ] && { echo "$d"; return; }
+                ;;
+        esac
     done
+    # Nothing already on PATH was writable. Root can still write to
+    # /usr/local/bin — the standard location, on PATH for virtually every
+    # login shell even when this script's own (possibly minimal) PATH
+    # didn't show it above — so prefer that over an unlisted ~/.local/bin.
+    if [ "$(id -u 2>/dev/null)" = "0" ] && mkdir -p /usr/local/bin 2>/dev/null && [ -w /usr/local/bin ]; then
+        echo "/usr/local/bin"; return
+    fi
     # ~/.local/bin even if not yet on PATH (we'll warn)
     if mkdir -p "$HOME/.local/bin" 2>/dev/null && [ -w "$HOME/.local/bin" ]; then
         echo "$HOME/.local/bin"; return
