@@ -23,9 +23,10 @@ concurrently.
   completes in a couple of seconds.
 -  **Two tools in one** — port/service scanning *and* DNS resolution with the same
   familiar flags.
--  **Single static binary, zero heavy deps** — the DNS engine is implemented from
-  scratch; port datasets and the vuln DB are embedded, so the binary works from any
-  path with nothing else installed.
+-  **Single static binary, zero heavy deps** — the DNS engine, the TLS prober and
+  every protocol probe are implemented from scratch; port datasets (800+ named
+  ports) and the vuln DB are embedded, so the binary works from any path with
+  nothing else installed.
 -  **Runs anywhere, no root** — Termux (unrooted), Kali, Debian/Ubuntu, Arch,
   Fedora, Alpine, macOS.
 
@@ -195,6 +196,88 @@ Run `kaisen --help` for the full, always-current reference.
 
 ---
 
+## Service & version detection (`-sV`)
+
+`-sV` does not just grab a banner. Kaisen runs a **per-port probe plan** in three
+tiers, cheapest first:
+
+1. **Listen** — protocols that greet you first (SSH, SMTP, FTP, IMAP/POP3, NNTP,
+   VNC, rsync, MySQL, IRC, Telnet, svnserve…).
+2. **Probe** — say the one thing that makes a silent service identify itself.
+3. **Fallback** — for a port with no plan and no greeting, try HTTP, then TLS,
+   because unusual ports are exactly where unexpected web and TLS services live.
+
+### Protocols Kaisen speaks to get a version
+
+| Protocol | What it sends | What you get back |
+|----------|---------------|-------------------|
+| **TLS/SSL** | a hand-rolled ClientHello (TLS 1.2, retried as 1.3) | negotiated version, cipher, ALPN, certificate CN, issuer, SAN hostnames, expiry |
+| **SMB2** | NEGOTIATE | dialect → Windows generation, signing policy |
+| **MS SQL Server** | TDS PRELOGIN | exact build → `15.0.2000` = SQL Server 2019 |
+| **MongoDB** | OP_QUERY `isMaster`, then `buildInfo` | release from `maxWireVersion`, exact version if unauthenticated |
+| **Oracle** | TNS connect | `VSNNUM` decoded to `11.2.0.4.0` |
+| **PostgreSQL** | SSLRequest + startup | TLS support and the auth method demanded |
+| **RDP** | X.224 negotiation (+ TLS) | security layer (NLA or not), machine hostname from the certificate |
+| **AMQP** | protocol header | `connection.start` server properties: RabbitMQ + exact version |
+| **Kafka** | ApiVersions | API map → approximate broker release |
+| **Cassandra** | CQL OPTIONS | supported CQL version |
+| **LDAP** | anonymous rootDSE search | AD vs OpenLDAP, DC hostname, naming contexts |
+| **DNS** | `version.bind` CHAOS TXT over TCP | BIND / PowerDNS / Unbound / dnsmasq + version |
+| **MQTT** | CONNECT | broker version and whether anonymous connects are accepted |
+| **X11** | connection setup | protocol version, vendor, and whether access control is off |
+| **epmd** | NAMES | every registered Erlang node and its distribution port |
+| **Minecraft** | Server List Ping | server version, protocol, player count |
+| **AJP13** | CPing | connector reachable (the Ghostcat precondition) |
+| **SOCKS** | greeting | version and whether it is an open proxy |
+| **Redis / memcached / ZooKeeper** | `INFO` / `version` / `srvr` | version plus whether auth is enforced |
+| **HTTP** | `GET /` with a real `Host` | `Server`, `X-Powered-By`, `X-Jenkins` and friends, `<title>`, JSON version APIs |
+
+HTTP detection also fingerprints **~180 applications and appliances** from
+headers, cookies, body markers and certificate names — WordPress, Jenkins,
+GitLab, Grafana, Kibana, Proxmox, pfSense, Synology, Home Assistant, MikroTik,
+printers, cameras and so on — and reads the version out of JSON roots for
+Elasticsearch, etcd, Docker, Consul, Vault and Kibana.
+
+Because virtual-hosted servers answer a bare IP with a generic page, Kaisen
+sends the name you actually asked for as the HTTP `Host` header and as TLS SNI.
+
+```sh
+kaisen -sV example.com
+```
+
+```
+443/tcp  open  https   TLS 1.3 (CN=example.com; issuer=R11; expires 2026-09-06; ALPN=h2)
+```
+
+---
+
+## Vulnerability signatures (`-vuln`)
+
+`-vuln` matches whatever `-sV` found against an embedded database of **69
+version signatures** plus **~70 port-level exposure heuristics**. It is a
+triage aid, not a scanner: nothing is exploited, and every finding is something
+you should go and confirm.
+
+Version signatures cover the usual suspects (OpenSSH including `regreSSHion`
+and Terrapin, Apache, nginx, Tomcat/Ghostcat, Exim, Dovecot, Samba, MySQL,
+ProFTPD, vsFTPd) and the modern application layer (Jenkins, GitLab, Grafana,
+Confluence, Elasticsearch, Kibana, BIND, dnsmasq, Oracle TNS poisoning,
+end-of-life SQL Server and MySQL branches, obsolete TLS versions, expired and
+self-signed certificates).
+
+Exposure heuristics flag services that are dangerous *because they are
+reachable at all* — etcd, kubelet, Docker's API, Helm Tiller, SaltStack,
+Erlang EPMD, IPMI/BMC and Intel AMT, X11, r-services — including the industrial
+protocols that have no authentication by design (Modbus, DNP3, EtherNet/IP,
+BACnet, S7).
+
+Findings that only apply under a condition say so only when that condition
+holds: "RDP without Network Level Authentication" fires when NLA is absent,
+not on every RDP port, and MongoDB is only called unauthenticated when
+`buildInfo` actually answered.
+
+---
+
 ## Targets
 
 Kaisen accepts hostnames, IPv4/IPv6 addresses, and IPv4 CIDR ranges (up to `/16`):
@@ -235,7 +318,7 @@ so they don't pollute redirected results.
 |---------|--------------|-----------------------|
 | Connect scan `-sT` | ✅ full speed | ✅ |
 | SYN scan `-sS` | ↩︎ auto-falls back to `-sT` (notice printed) | (raw SYN — roadmap) |
-| Service/version `-sV` | ✅ banner + probes | ✅ |
+| Service/version `-sV` | ✅ banners + 20 protocol probes + TLS certificates | ✅ |
 | DNS / `dig` | ✅ full | ✅ |
 | OS detection `-OS` | ✅ multi-signal (TTL + SNMP + banners), see below | (TCP/IP fingerprint — roadmap) |
 | ICMP ping discovery | ✅ via the system `ping` binary (unprivileged) | ✅ |
@@ -254,7 +337,11 @@ combines several **unprivileged** signals and scores them by confidence:
   the host exposes SNMP.
 - **FTP `SYST`**: the FTP server itself announces `UNIX`/`Windows`.
 - **Service banners**: SSH/HTTP/SMTP version strings that name the distro
-  (e.g. `OpenSSH ... Ubuntu`, `Server: Apache/2.4 (Debian)`).
+  (e.g. `OpenSSH ... Ubuntu`, `Server: Apache/2.4 (Debian)`), across ~55 distro
+  and platform keywords — Ubuntu, Debian, Rocky, AlmaLinux, Amazon Linux,
+  Alpine, SUSE, the BSDs, Solaris, AIX, OpenWrt, RouterOS, Synology, VxWorks.
+- **Protocol probes**: an SMB dialect implies a Windows generation, a TDS
+  pre-login response means Windows, an FTP `SYST` says `UNIX` or `Windows`.
 - **Open-port profile** as a weak fallback (e.g. 445/3389 → Windows).
 
 Used alone, `kaisen -OS <target>` prints a focused report (OS, confidence, role,

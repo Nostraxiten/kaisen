@@ -294,7 +294,9 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
                 let default = service_name(port).to_string();
                 async move {
                     let addr = SocketAddr::new(ip, port);
-                    let info = service::detect(addr, &default, timeout_ms.max(1500)).await;
+                    // The original target doubles as TLS SNI and the HTTP Host
+                    // header, so virtual-hosted services answer properly.
+                    let info = service::detect(addr, &default, timeout_ms.max(1500), target).await;
                     (port, info)
                 }
             })
@@ -483,6 +485,20 @@ fn infer_device(report: &HostReport) -> (String, &'static str, Vec<String>) {
         .map(|r| r.port)
         .collect();
     let has = |p: u16| open_ports.contains(&p);
+    // Several device ports collide with unrelated services (8009 is Google Cast
+    // *and* Tomcat's AJP connector; 5555 is Android ADB *and* freeciv). Now that
+    // `-sV` can actually name what is listening, let the identified service veto
+    // a guess made purely from the port number.
+    let service_on = |p: u16| -> Option<&crate::service::ServiceInfo> {
+        report
+            .ports
+            .iter()
+            .find(|r| r.port == p && r.state == State::Open)
+            .and_then(|r| r.service.as_ref())
+    };
+    let identified_as = |p: u16, name: &str| -> bool {
+        service_on(p).map(|s| s.name == name).unwrap_or(false)
+    };
     let ttl_family = report.probes.as_ref().and_then(|p| p.ttl_family);
     let is_windows_ttl = matches!(ttl_family, Some(f) if f.starts_with("Windows"));
     let is_unix_ttl = matches!(ttl_family, Some(f) if f.starts_with("Linux"));
@@ -500,6 +516,12 @@ fn infer_device(report: &HostReport) -> (String, &'static str, Vec<String>) {
                 banner.push(' ');
                 banner.push_str(&svc.extra);
                 banner.push(' ');
+                // Certificate names are often the most specific label a device
+                // ever emits — appliances ship certs naming the model outright.
+                for h in &svc.hostnames {
+                    banner.push_str(h);
+                    banner.push(' ');
+                }
             }
         }
     }
@@ -509,16 +531,103 @@ fn infer_device(report: &HostReport) -> (String, &'static str, Vec<String>) {
 
     // ── Strongest: a banner naming the actual product ────────────────────
     let banner_matches: &[(&str, &str)] = &[
+        // ── cameras, DVRs and doorbells ─────────────────────────────────
         ("hikvision", "IP Camera / DVR (Hikvision)"),
         ("dahua", "IP Camera / DVR (Dahua)"),
+        ("axis camera", "IP Camera (Axis)"),
+        ("foscam", "IP Camera (Foscam)"),
+        ("reolink", "IP Camera (Reolink)"),
+        ("amcrest", "IP Camera (Amcrest)"),
+        ("xiongmai", "IP Camera / DVR (XiongMai)"),
+        ("ubnt", "Ubiquiti network device (AP/switch/gateway)"),
+        // ── TVs, speakers and streaming ─────────────────────────────────
         ("nrdp", "Smart TV / streaming device (Roku/NRDP)"),
         ("roku", "Smart TV / streaming device (Roku)"),
+        ("chromecast", "Chromecast / Google Cast device"),
         ("sonos", "Sonos speaker"),
+        ("airplay", "Apple AirPlay receiver (TV/speaker)"),
+        ("jellyfin", "Media server (Jellyfin)"),
+        ("plex media server", "Media server (Plex)"),
+        ("emby", "Media server (Emby)"),
+        ("kodi", "Media centre (Kodi)"),
+        ("bravia", "Smart TV (Sony Bravia)"),
+        ("webos", "Smart TV (LG webOS)"),
+        ("tizen", "Smart TV (Samsung Tizen)"),
+        // ── NAS and home servers ────────────────────────────────────────
         ("synology", "Synology NAS"),
+        ("diskstation", "Synology NAS"),
         ("qnap", "QNAP NAS"),
+        ("truenas", "TrueNAS storage appliance"),
+        ("freenas", "FreeNAS storage appliance"),
+        ("openmediavault", "OpenMediaVault NAS"),
+        ("unraid", "Unraid server"),
+        ("netapp", "NetApp storage appliance"),
+        // ── routers, APs and CPE ────────────────────────────────────────
         ("unifi", "Ubiquiti network device (AP/switch/gateway)"),
         ("ubiquiti", "Ubiquiti network device (AP/switch/gateway)"),
-        ("airplay", "Apple AirPlay receiver (TV/speaker)"),
+        ("mikrotik", "MikroTik router"),
+        ("routeros", "MikroTik router"),
+        ("openwrt", "Router running OpenWrt"),
+        ("dd-wrt", "Router running DD-WRT"),
+        ("tp-link", "TP-Link router / AP"),
+        ("netgear", "Netgear router / AP"),
+        ("d-link", "D-Link router / AP"),
+        ("linksys", "Linksys router / AP"),
+        ("asuswrt", "ASUS router"),
+        ("zyxel", "Zyxel router / CPE"),
+        ("huawei", "Huawei router / CPE"),
+        ("technicolor", "Technicolor CPE"),
+        ("fritz!box", "AVM FRITZ!Box router"),
+        ("cisco ios", "Cisco network device"),
+        ("juniper", "Juniper network device"),
+        ("aruba", "Aruba network device"),
+        // ── security appliances ─────────────────────────────────────────
+        ("pfsense", "Firewall appliance (pfSense)"),
+        ("opnsense", "Firewall appliance (OPNsense)"),
+        ("fortigate", "Firewall appliance (Fortinet FortiGate)"),
+        ("sonicwall", "Firewall appliance (SonicWall)"),
+        ("pan-os", "Firewall appliance (Palo Alto)"),
+        ("watchguard", "Firewall appliance (WatchGuard)"),
+        ("big-ip", "Load balancer (F5 BIG-IP)"),
+        ("netscaler", "Load balancer (Citrix NetScaler)"),
+        // ── printers ────────────────────────────────────────────────────
+        ("jetdirect", "Network printer (HP JetDirect)"),
+        ("laserjet", "Network printer (HP LaserJet)"),
+        ("officejet", "Network printer (HP OfficeJet)"),
+        ("brother", "Network printer (Brother)"),
+        ("kyocera", "Network printer (Kyocera)"),
+        ("lexmark", "Network printer (Lexmark)"),
+        ("epson", "Network printer (Epson)"),
+        // Not a bare "canon": every Ubuntu banner says "Canonical".
+        ("canon inc", "Network printer (Canon)"),
+        ("imagerunner", "Network printer (Canon imageRUNNER)"),
+        ("i-sensys", "Network printer (Canon i-SENSYS)"),
+        // ── smart home and IoT ──────────────────────────────────────────
+        ("home assistant", "Home automation hub (Home Assistant)"),
+        ("openhab", "Home automation hub (openHAB)"),
+        ("philips hue", "Philips Hue bridge"),
+        ("tasmota", "IoT device (Tasmota firmware)"),
+        ("esphome", "IoT device (ESPHome firmware)"),
+        ("shelly", "Shelly smart relay"),
+        ("tuya", "Tuya smart device"),
+        ("octoprint", "3D printer controller (OctoPrint)"),
+        ("pi-hole", "Raspberry Pi running Pi-hole"),
+        ("raspbian", "Raspberry Pi"),
+        ("raspberry pi", "Raspberry Pi"),
+        // ── virtualisation and management ───────────────────────────────
+        ("proxmox", "Hypervisor host (Proxmox VE)"),
+        ("esxi", "Hypervisor host (VMware ESXi)"),
+        ("vsphere", "VMware management host"),
+        ("xenserver", "Hypervisor host (Citrix XenServer)"),
+        ("idrac", "Server BMC (Dell iDRAC)"),
+        // "ilo" on its own is a substring of far too many ordinary words.
+        ("integrated lights-out", "Server BMC (HPE iLO)"),
+        ("hp ilo", "Server BMC (HPE iLO)"),
+        ("supermicro", "Server BMC (Supermicro IPMI)"),
+        // ── consoles and desktops ───────────────────────────────────────
+        ("nintendo", "Nintendo console"),
+        ("playstation", "PlayStation console"),
+        ("xbox", "Xbox console"),
     ];
     for (needle, label) in banner_matches {
         if has_banner(needle) {
@@ -538,7 +647,7 @@ fn infer_device(report: &HostReport) -> (String, &'static str, Vec<String>) {
     }
 
     // ── Media / casting devices ────────────────────────────────────────────
-    if has(8008) || has(8009) {
+    if (has(8008) || has(8009)) && !identified_as(8009, "ajp13") {
         signals.push("8008-8009/tcp open — Google Cast protocol".to_string());
         return ("Chromecast / Google Cast device (TV, speaker or Android TV)".to_string(), "medium", signals);
     }
@@ -570,13 +679,22 @@ fn infer_device(report: &HostReport) -> (String, &'static str, Vec<String>) {
     }
 
     // ── Router / gateway: DNS + a web admin UI on the same box ────────────
-    if has(53) && (has(80) || has(443)) {
+    // A full-fat recursive/authoritative server means a real DNS host, not a
+    // consumer gateway — dnsmasq is the one that genuinely points at CPE.
+    let heavyweight_dns = service_on(53)
+        .map(|s| {
+            ["BIND", "PowerDNS", "Unbound", "Knot", "NSD", "CoreDNS"]
+                .iter()
+                .any(|p| s.product.contains(p))
+        })
+        .unwrap_or(false);
+    if has(53) && (has(80) || has(443)) && !heavyweight_dns {
         signals.push("53/tcp + 80/443 open — DNS + web admin UI, typical of a router/gateway".to_string());
         return ("Router / gateway".to_string(), "medium", signals);
     }
 
     // ── Android (weak signal: ADB left open) ───────────────────────────────
-    if has(5555) && is_unix_ttl {
+    if has(5555) && is_unix_ttl && !identified_as(5555, "freeciv") {
         signals.push("5555/tcp open — commonly Android ADB".to_string());
         return ("Android (heuristic)".to_string(), "low", signals);
     }
@@ -963,13 +1081,26 @@ fn print_json(report: &HostReport, opts: &Options) {
                 )
             })
             .collect();
+        let hostnames: Vec<String> = svc
+            .map(|s| s.hostnames.iter().map(|h| format!("\"{}\"", json_escape(h))).collect())
+            .unwrap_or_default();
         ports_json.push(format!(
-            "{{\"port\":{},\"protocol\":\"tcp\",\"state\":\"{}\",\"service\":\"{}\",\"product\":\"{}\",\"version\":\"{}\",\"findings\":[{}]}}",
+            "{{\"port\":{},\"protocol\":\"tcp\",\"state\":\"{}\",\"service\":\"{}\",\"product\":\"{}\",\
+             \"version\":\"{}\",\"extra\":\"{}\",\"banner\":\"{}\",\"os_hint\":\"{}\",\
+             \"tls\":{{\"version\":\"{}\",\"cert_expired\":{},\"self_signed\":{}}},\
+             \"hostnames\":[{}],\"findings\":[{}]}}",
             r.port,
             r.state.label(),
             json_escape(&svc.map(|s| s.name.clone()).unwrap_or_else(|| service_name(r.port).to_string())),
             json_escape(&svc.map(|s| s.product.clone()).unwrap_or_default()),
             json_escape(&svc.map(|s| s.version.clone()).unwrap_or_default()),
+            json_escape(&svc.map(|s| s.extra.clone()).unwrap_or_default()),
+            json_escape(&svc.map(|s| s.banner.clone()).unwrap_or_default()),
+            json_escape(&svc.map(|s| s.os_hint.clone()).unwrap_or_default()),
+            json_escape(&svc.map(|s| s.tls_version.clone()).unwrap_or_default()),
+            svc.map(|s| s.cert_expired).unwrap_or(false),
+            svc.map(|s| s.self_signed).unwrap_or(false),
+            hostnames.join(","),
             findings.join(",")
         ));
     }

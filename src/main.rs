@@ -9,8 +9,10 @@ mod neigh;
 mod osfp;
 mod output;
 mod ports;
+mod probe;
 mod scan;
 mod service;
+mod tls;
 mod vuln;
 mod whois;
 
