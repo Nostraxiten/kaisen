@@ -22,7 +22,7 @@ once.
 > ping, TCP/IP OS fingerprinting) degrade gracefully with a clear notice instead
 > of failing.
 
-
+<img width="500" alt="Kaisen scanning a host" src="https://github.com/user-attachments/assets/0908f363-7457-4ad0-914f-8dd10b3eba19" />
 
 ---
 
