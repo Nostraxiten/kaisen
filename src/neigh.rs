@@ -39,6 +39,25 @@ const SUBDOMAINS: &[&str] = &[
     "dashboard", "panel", "console", "manage", "management", "office", "corp",
 ];
 
+/// Read an optional cap from an environment variable. Accepts a positive
+/// integer, or "all"/"0" meaning "no limit" (returns `usize::MAX`). Falls back
+/// to `default` when the variable is unset, empty, or unparseable.
+fn env_cap(var: &str, default: usize) -> usize {
+    match std::env::var(var) {
+        Ok(v) => {
+            let v = v.trim();
+            if v.is_empty() {
+                default
+            } else if v.eq_ignore_ascii_case("all") || v == "0" {
+                usize::MAX
+            } else {
+                v.parse::<usize>().unwrap_or(default)
+            }
+        }
+        Err(_) => default,
+    }
+}
+
 /// Recognise generic CDN/cloud reverse-DNS names (auto-generated per IP) so we
 /// can collapse them instead of flooding the output with a whole provider /24.
 fn cdn_provider(host: &str) -> Option<&'static str> {
@@ -195,8 +214,10 @@ pub async fn run(
         let o = ip.octets();
         subnets.insert([o[0], o[1], o[2]]);
     }
-    // Cap to avoid scanning many /24s (e.g. CDN-spread records).
-    let capped: Vec<[u8; 3]> = subnets.into_iter().take(2).collect();
+    // Cap how many /24s we scan (e.g. CDN-spread records). Default 2; override
+    // with KAISEN_NEIGH_SUBNETS (a number, or "all"/"0" for every discovered /24).
+    let subnet_cap = env_cap("KAISEN_NEIGH_SUBNETS", 2);
+    let capped: Vec<[u8; 3]> = subnets.into_iter().take(subnet_cap).collect();
 
     if !capped.is_empty() {
         println!();
@@ -252,12 +273,20 @@ pub async fn run(
             for (ip, name) in &related {
                 println!("  {:<16} {}", ip, p.cyan(name));
             }
-            const MAX_OTHER: usize = 40;
-            for (ip, name) in other.iter().take(MAX_OTHER) {
+            // How many "other" neighbours to print. Default 40; override with
+            // KAISEN_NEIGH_MAX (a number, or "all"/"0" to print every one).
+            let max_other = env_cap("KAISEN_NEIGH_MAX", 40);
+            for (ip, name) in other.iter().take(max_other) {
                 println!("  {:<16} {}", ip, name);
             }
-            if other.len() > MAX_OTHER {
-                println!("{}", p.dim(&format!("  ... and {} more", other.len() - MAX_OTHER)));
+            if other.len() > max_other {
+                println!(
+                    "{}",
+                    p.dim(&format!(
+                        "  ... and {} more (set KAISEN_NEIGH_MAX=all to show them)",
+                        other.len() - max_other
+                    ))
+                );
             }
             if !cdn.is_empty() {
                 let summary = cdn
