@@ -1024,28 +1024,25 @@ fn parse_banner(port: u16, data: &[u8], info: &mut ServiceInfo) {
 }
 
 /// MySQL/MariaDB initial handshake packet:
-/// `[3-byte length][seq][protocol version 0x0a][NUL-terminated server version]`.
+/// `[3-byte length][seq][protocol version 0x0a][NUL-terminated server version]`,
+/// then connection id (4), salt part 1 (8), filler, capability flags low (2),
+/// default collation (1), status flags (2), capability flags high (2), salt
+/// length (1), 10 reserved bytes, salt part 2 and the auth plugin name.
+///
+/// Only the version string is dependable: proxies, forks and honeypots cut the
+/// tail short, so every field after it is read defensively and simply left out
+/// when the packet ends early.
 fn parse_mysql(data: &[u8], info: &mut ServiceInfo) -> bool {
     if data.len() < 6 {
         return false;
     }
     // Error packet: the server rejected us but still identified itself.
     if data[3] == 0x00 && data[4] == 0xff {
-        let msg = String::from_utf8_lossy(&data[7..data.len().min(200)]).to_string();
-        if msg.to_ascii_lowercase().contains("mysql") || msg.to_ascii_lowercase().contains("mariadb")
-        {
-            info.name = "mysql".into();
-            info.product = if msg.to_ascii_lowercase().contains("mariadb") {
-                "MariaDB".into()
-            } else {
-                "MySQL".into()
-            };
-            info.extra = msg.trim().chars().take(120).collect();
-            return true;
-        }
-        return false;
+        return parse_mysql_error(data, info);
     }
-    if data[4] != 0x0a {
+    // 10 is the handshake everything since 4.1 speaks; 9 is the pre-4.1 one,
+    // still emitted by museum installs and by a few honeypots.
+    if data[4] != 0x0a && data[4] != 0x09 {
         return false;
     }
     let end = match data[5..].iter().position(|&b| b == 0) {
@@ -1058,42 +1055,429 @@ fn parse_mysql(data: &[u8], info: &mut ServiceInfo) -> bool {
     }
 
     info.name = "mysql".into();
-    // MariaDB fakes a "5.5.5-" prefix so old clients keep working.
-    let (product, version) = if let Some(rest) = raw.strip_prefix("5.5.5-") {
-        ("MariaDB".to_string(), rest.to_string())
-    } else if raw.to_ascii_lowercase().contains("mariadb") {
-        ("MariaDB".to_string(), raw.clone())
-    } else if raw.to_ascii_lowercase().contains("percona") {
-        ("Percona Server".to_string(), raw.clone())
-    } else {
-        ("MySQL".to_string(), raw.clone())
+    if info.banner.is_empty() {
+        info.banner = raw.chars().take(120).collect();
+    }
+
+    // MariaDB fakes a "5.5.5-" prefix so pre-10.x clients keep working. Every
+    // other fork signs the version string itself, which is why the flavour
+    // lookup runs on that and never on the random salt bytes behind it.
+    let reported = raw.strip_prefix("5.5.5-").unwrap_or(&raw).to_string();
+    let low = reported.to_ascii_lowercase();
+    let tail = String::from_utf8_lossy(&data[end..]).to_string();
+
+    // Longest needle wins, exactly like SSH_SOFTWARE: "mariadb-maxscale" is a
+    // proxy in front of a database, not a database, and "xtradb-cluster" is
+    // Percona's Galera build rather than plain Percona Server.
+    let flavor = MYSQL_FLAVORS
+        .iter()
+        .filter(|(needle, _, _)| low.contains(needle))
+        .max_by_key(|(needle, _, _)| needle.len());
+
+    // A fork that fronts a MySQL compatibility version reports its own after the
+    // marker: "8.0.11-TiDB-v7.5.0" is TiDB 7.5.0, and calling it MySQL 8.0.11
+    // would pin a decade of MySQL CVEs on an engine that never had them.
+    let (product, version, matched, own_used) = match flavor {
+        Some((needle, label, own)) => {
+            let own_version = if own.is_empty() { None } else { version_after(&low, own) };
+            let used = own_version.is_some();
+            let version = own_version.unwrap_or_else(|| leading_version(&reported));
+            ((*label).to_string(), version, *needle, used)
+        }
+        None => ("MySQL".to_string(), leading_version(&reported), "", false),
     };
     info.product = product;
-    let mut parts = version.splitn(2, '-');
-    info.version = parts.next().unwrap_or("").to_string();
-    let suffix = parts.next().unwrap_or("").to_string();
+    info.version = version;
 
-    // The auth plugin at the tail of the handshake distinguishes 8.x defaults.
-    let tail = String::from_utf8_lossy(&data[end..]);
-    let mut extras = Vec::new();
-    if !suffix.is_empty() {
-        extras.push(suffix);
+    let mut extras: Vec<String> = Vec::new();
+    if data[4] == 0x09 {
+        push_unique(&mut extras, "pre-4.1 protocol");
     }
-    for plugin in [
-        "caching_sha2_password",
-        "mysql_native_password",
-        "sha256_password",
-        "auth_gssapi_client",
-    ] {
+    // Which release series this is, and whether that series still gets fixes.
+    if let Some(series) = mysql_series(&info.product, &info.version) {
+        push_unique(&mut extras, series);
+    }
+    // Oracle's paid builds say so in the version string; nothing else does.
+    if let Some((_, edition)) = MYSQL_EDITIONS.iter().find(|(needle, _)| low.contains(needle)) {
+        push_unique(&mut extras, edition);
+    }
+    for (needle, label) in MYSQL_BUILD_FLAGS {
+        if low.contains(needle) {
+            push_unique(&mut extras, label);
+        }
+    }
+    // "8.0.35-cluster" is MySQL NDB. "…-xtradb-cluster" is Percona's Galera
+    // build, which the wsrep tag above already names.
+    if low.contains("-cluster") && !low.contains("xtradb") {
+        push_unique(&mut extras, "NDB Cluster");
+    }
+    // Whatever the packager wrote after the first dash — "0ubuntu0.22.04.1",
+    // "1:10.11.6+maria~ubu2204", Percona's "-27". Kept only when it carries a
+    // number, so a tail that is purely a tag named above isn't repeated.
+    let build: String =
+        reported.split_once('-').map(|x| x.1).unwrap_or("").chars().take(60).collect();
+    // The flavour's own name in front of that tail is already the product name.
+    let build = match !matched.is_empty() && build.to_ascii_lowercase().starts_with(matched) {
+        true => build[matched.len()..].trim_start_matches(['-', '_', ' ']),
+        false => &build,
+    };
+    // A fork whose own version we just read wrote nothing else here.
+    if !own_used && build.chars().any(|c| c.is_ascii_digit()) {
+        push_unique(&mut extras, build);
+    }
+    // The default auth plugin dates a server better than its build tail does.
+    for plugin in MYSQL_AUTH_PLUGINS {
         if tail.contains(plugin) {
-            extras.push(plugin.to_string());
+            push_unique(&mut extras, plugin);
             break;
         }
     }
-    info.extra = extras.join("; ");
+    // The fixed part after the version. Capability flags carry the one
+    // security-relevant bit a handshake hands out before anyone authenticates:
+    // whether the server will accept TLS at all.
+    if let Some(caps) = mysql_capabilities(data, end) {
+        push_unique(
+            &mut extras,
+            if caps & MYSQL_CLIENT_SSL != 0 { "TLS supported" } else { "no TLS offered" },
+        );
+        if caps & MYSQL_CLIENT_COMPRESS != 0 {
+            push_unique(&mut extras, "compression offered");
+        }
+    }
+    // The default collation corroborates the branch: 255 is 8.0's
+    // utf8mb4_0900_ai_ci, 8 is the latin1 default nothing past 5.7 ships.
+    if let Some(collation) = mysql_collation(data, end) {
+        push_unique(&mut extras, collation);
+    }
+
+    info.extra = extras.join("; ").chars().take(200).collect();
     detect_os_from_text(&raw, info);
     true
 }
+
+/// The other way a MySQL server introduces itself: it refuses the connection
+/// and explains why. `[len][seq][0xff][code lo][code hi][message]`. The message
+/// names the flavour ("… to this MariaDB server") and the code is worth
+/// reporting on its own — 1130 and 1129 mean *this host* is blocked, not that
+/// the database is shut to everyone.
+fn parse_mysql_error(data: &[u8], info: &mut ServiceInfo) -> bool {
+    let code = u16::from_le_bytes([*data.get(5).unwrap_or(&0), *data.get(6).unwrap_or(&0)]);
+    let msg = String::from_utf8_lossy(&data[7.min(data.len())..data.len().min(200)]).to_string();
+    let low = msg.to_ascii_lowercase();
+    let known = MYSQL_ERRORS.iter().find(|(c, _)| *c == code).map(|(_, text)| *text);
+    let flavor = MYSQL_FLAVORS
+        .iter()
+        .filter(|(needle, _, _)| low.contains(needle))
+        .max_by_key(|(needle, _, _)| needle.len());
+    // A leading 0xff is not exclusive to this protocol, so claim the port only
+    // when the message names the product, or when a known MySQL error code
+    // comes with text that actually reads like an error message.
+    let texty = msg.len() >= 10 && msg.chars().all(|c| c.is_ascii_graphic() || c == ' ');
+    if flavor.is_none() && !low.contains("mysql") && !(known.is_some() && texty) {
+        return false;
+    }
+
+    info.name = "mysql".into();
+    info.product = match flavor {
+        Some((_, label, _)) => (*label).to_string(),
+        None => "MySQL".to_string(),
+    };
+    if info.banner.is_empty() {
+        if let Some(clean) = readable(msg.trim()) {
+            info.banner = clean;
+        }
+    }
+    let mut extras: Vec<String> = Vec::new();
+    match known {
+        Some(text) => push_unique(&mut extras, &format!("error {code}: {text}")),
+        None if code != 0 => push_unique(&mut extras, &format!("error {code}")),
+        None => {}
+    }
+    push_unique(&mut extras, msg.trim());
+    info.extra = extras.join("; ").chars().take(200).collect();
+    detect_os_from_text(&msg, info);
+    true
+}
+
+/// Capability flags from the fixed part of the handshake: the low 16 bits sit
+/// 14 bytes past the version string's NUL, the high 16 five bytes later.
+/// `None` when the packet stops before them — proxies routinely truncate it.
+fn mysql_capabilities(data: &[u8], end: usize) -> Option<u32> {
+    let low = u16::from_le_bytes([*data.get(end + 14)?, *data.get(end + 15)?]) as u32;
+    let high = match (data.get(end + 19), data.get(end + 20)) {
+        (Some(a), Some(b)) => u16::from_le_bytes([*a, *b]) as u32,
+        _ => 0,
+    };
+    Some(low | (high << 16))
+}
+
+/// The server's default collation, one byte past the low capability flags.
+fn mysql_collation(data: &[u8], end: usize) -> Option<&'static str> {
+    let id = *data.get(end + 16)?;
+    MYSQL_COLLATIONS.iter().find(|(k, _)| *k == id).map(|(_, name)| *name)
+}
+
+/// Name the release series a version belongs to, and say whether that series
+/// still gets security fixes. Forks and proxies keep their own calendars, so
+/// they get nothing here rather than a confidently wrong date.
+fn mysql_series(product: &str, version: &str) -> Option<&'static str> {
+    let mut nums = version.split('.').map(|p| {
+        p.chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect::<String>()
+            .parse::<u32>()
+            .ok()
+    });
+    let major = nums.next().flatten()?;
+    let minor = nums.next().flatten().unwrap_or(0);
+    let mariadb = product.contains("MariaDB");
+    let table = match product {
+        // These report a version they emulate, not one they are.
+        p if p.contains("MaxScale") || p.contains("ProxySQL") || p.contains("Vitess") => {
+            return None
+        }
+        _ if mariadb => MARIADB_BRANCHES,
+        p if p.contains("MySQL") || p.contains("Percona") => MYSQL_BRANCHES,
+        _ => return None,
+    };
+    if let Some((_, label)) = table.iter().find(|((ma, mi), _)| (*ma, *mi) == (major, minor)) {
+        return Some(label);
+    }
+    // A series newer than this table: name the track rather than invent a date.
+    // Oracle alternates LTS and Innovation releases; MariaDB ships rolling ones
+    // between its LTS branches.
+    match (mariadb, major) {
+        (true, m) if m >= 11 => Some("rolling release"),
+        (false, m) if m >= 8 => Some("Innovation release"),
+        _ => None,
+    }
+}
+
+/// The leading dotted number: "8.0.35-0ubuntu0.22.04.1" is version 8.0.35 and
+/// everything past the first dash is the packager's business.
+fn leading_version(s: &str) -> String {
+    let head = s.split('-').next().unwrap_or("").trim();
+    let num: String = head.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+    // Aurora reports "5.6.10a", and that letter is part of the number. Anything
+    // longer than one letter is a fork's name glued to it, as in
+    // "8.0.mysql_aurora.3.04.0", and only the digits in front are the version.
+    let rest = &head[num.len()..];
+    if rest.len() == 1 && rest.chars().all(|c| c.is_ascii_alphabetic()) {
+        head.to_string()
+    } else {
+        num.trim_end_matches('.').to_string()
+    }
+}
+
+/// The number a fork writes right after its own name: "…-tidb-v7.5.0" → 7.5.0.
+fn version_after(hay: &str, marker: &str) -> Option<String> {
+    let rest = hay.split_once(marker)?.1;
+    let v: String = rest
+        .trim_start_matches(['-', '_', ' ', ':', '.', 'v'])
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
+    let v = v.trim_end_matches('.').to_string();
+    v.chars().next().filter(char::is_ascii_digit).map(|_| v)
+}
+
+fn push_unique(list: &mut Vec<String>, item: &str) {
+    if !item.is_empty() && !list.iter().any(|e| e == item) {
+        list.push(item.to_string());
+    }
+}
+
+/// Everything that answers on 3306 while not being Oracle's MySQL: forks,
+/// managed rebuilds, protocol-compatible engines and the proxies that sit in
+/// front of all of them. Keyed on a lowercase needle in the version string,
+/// longest needle first. The third field is the marker a fork writes its *own*
+/// version after, empty when the leading number is already the real one.
+///
+/// Products keep "MySQL" or "MariaDB" in their name wherever the engine really
+/// is one, because `vuln::assess` and `cve::correlate` match products by
+/// substring — that is what keeps the EOL and exposure findings firing on a
+/// managed rebuild. Engines that merely speak the protocol (TiDB, Doris,
+/// SingleStore…) deliberately do not, since MySQL's CVEs are not theirs.
+pub(crate) const MYSQL_FLAVORS: &[(&str, &str, &str)] = &[
+    // ── the names the signature and CVE tables already key on ───────────
+    ("mariadb", "MariaDB", ""),
+    ("percona", "Percona Server", ""),
+    ("xtradb-cluster", "Percona XtraDB Cluster", ""),
+    // ── managed rebuilds: the operator owns the version, not the admin ──
+    ("mysql_aurora", "Amazon Aurora MySQL", "mysql_aurora"),
+    ("aurora", "Amazon Aurora MySQL", ""),
+    ("azure", "Azure Database for MySQL", ""),
+    ("google", "Google Cloud SQL for MySQL", ""),
+    ("alisql", "AliSQL", ""),
+    ("polardb", "PolarDB for MySQL", ""),
+    ("rdsdb", "Amazon RDS for MySQL", ""),
+    ("txsql", "Tencent TXSQL", ""),
+    ("tdsql", "Tencent TDSQL", ""),
+    ("gaussdb", "Huawei GaussDB for MySQL", ""),
+    ("greatsql", "GreatSQL", ""),
+    ("opensource-percona", "Percona Server", ""),
+    // ── engines that speak the protocol but are not MySQL ───────────────
+    ("tidb", "TiDB", "tidb"),
+    ("oceanbase", "OceanBase", "oceanbase"),
+    ("doris", "Apache Doris", ""),
+    ("starrocks", "StarRocks", ""),
+    ("singlestore", "SingleStore", ""),
+    ("memsql", "SingleStore (MemSQL)", ""),
+    ("dolt", "Dolt", ""),
+    ("databend", "Databend", ""),
+    ("clickhouse", "ClickHouse", ""),
+    ("drizzle", "Drizzle", ""),
+    ("radondb", "RadonDB", ""),
+    ("manticore", "Manticore Search", ""),
+    ("sphinx", "Sphinx SphinxQL", ""),
+    // ── proxies and routers: what answers is not what stores ────────────
+    ("proxysql", "ProxySQL", ""),
+    ("maxscale", "MariaDB MaxScale", ""),
+    ("planetscale", "PlanetScale (Vitess)", ""),
+    ("vitess", "Vitess", "vitess"),
+    ("mysqlrouter", "MySQL Router", ""),
+    ("mysql router", "MySQL Router", ""),
+    ("kingshard", "kingshard", ""),
+    ("dbproxy", "DBProxy", ""),
+];
+
+/// Oracle's paid builds, which are the only ones that name an edition in the
+/// handshake. Longest needle first: the advanced build says all three words.
+const MYSQL_EDITIONS: &[(&str, &str)] = &[
+    ("enterprise-commercial-advanced", "Enterprise Advanced"),
+    ("enterprise-commercial", "Enterprise Commercial"),
+    ("enterprise", "Enterprise Edition"),
+    ("commercial", "commercial build"),
+];
+
+/// Build tags a server volunteers about how it was compiled or how it runs.
+const MYSQL_BUILD_FLAGS: &[(&str, &str)] = &[
+    ("-log", "binlog enabled"),
+    ("ndb", "NDB Cluster"),
+    ("wsrep", "Galera cluster node"),
+    ("galera", "Galera cluster node"),
+    ("debug", "debug build"),
+    ("valgrind", "valgrind build"),
+    ("asan", "ASan build"),
+    ("embedded", "embedded build"),
+];
+
+/// Auth plugins, which date a server better than its build tail does:
+/// `caching_sha2_password` is 8.0's default, `client_ed25519` and `parsec` are
+/// MariaDB's, `mysql_old_password` is the pre-4.1 hash nothing should offer.
+/// First match wins, so the specific names come before the generic ones.
+const MYSQL_AUTH_PLUGINS: &[&str] = &[
+    "caching_sha2_password",
+    "mysql_native_password",
+    "sha256_password",
+    "authentication_kerberos_client",
+    "authentication_ldap_sasl_client",
+    "authentication_webauthn_client",
+    "authentication_fido_client",
+    "auth_gssapi_client",
+    "client_ed25519",
+    "mysql_old_password",
+    "mysql_clear_password",
+    "unix_socket",
+    "auth_socket",
+    "parsec",
+    "dialog",
+];
+
+/// Connection refusals worth naming. A blocked host still proves a database is
+/// there, and 3159 in particular says the server requires TLS.
+const MYSQL_ERRORS: &[(u16, &str)] = &[
+    (1040, "too many connections"),
+    (1042, "cannot resolve client hostname"),
+    (1043, "bad handshake"),
+    (1045, "access denied"),
+    (1129, "host blocked after too many connection errors"),
+    (1130, "host not allowed to connect"),
+    (1152, "connection aborted"),
+    (1153, "packet larger than max_allowed_packet"),
+    (1156, "packets out of order"),
+    (1159, "read interrupted"),
+    (1203, "too many connections for this user"),
+    (1226, "user resource limit reached"),
+    (1251, "client does not support the server's auth protocol"),
+    (1698, "access denied (socket auth)"),
+    (3159, "connections require TLS (require_secure_transport)"),
+];
+
+/// Default collations worth recognising, each a hint at the branch: 8 is the
+/// latin1 default of 5.7 and older, 45/224 arrive with 5.5's utf8mb4, 255 is
+/// 8.0's.
+const MYSQL_COLLATIONS: &[(u8, &str)] = &[
+    (8, "latin1_swedish_ci"),
+    (33, "utf8_general_ci"),
+    (45, "utf8mb4_general_ci"),
+    (46, "utf8mb4_bin"),
+    (63, "binary"),
+    (83, "utf8_bin"),
+    (192, "utf8_unicode_ci"),
+    (224, "utf8mb4_unicode_ci"),
+    (255, "utf8mb4_0900_ai_ci"),
+];
+
+/// MySQL release series → support status, keyed on `(major, minor)`. Reporting
+/// "MySQL 5.7.44" is a fact; reporting that 5.7 stopped receiving security
+/// fixes in October 2023 is the part someone can act on. Percona Server tracks
+/// these branches, so it reads the same table.
+const MYSQL_BRANCHES: &[((u32, u32), &str)] = &[
+    ((3, 22), "3.22 EOL since 1999"),
+    ((3, 23), "3.23 EOL since 2006"),
+    ((4, 0), "4.0 EOL since 2008"),
+    ((4, 1), "4.1 EOL since Dec 2009"),
+    ((5, 0), "5.0 EOL since Jan 2012"),
+    ((5, 1), "5.1 EOL since Dec 2013"),
+    ((5, 5), "5.5 EOL since Dec 2018"),
+    ((5, 6), "5.6 EOL since Feb 2021"),
+    ((5, 7), "5.7 EOL since Oct 2023"),
+    ((8, 0), "8.0 EOL since Apr 2026"),
+    ((8, 1), "8.1 Innovation, superseded"),
+    ((8, 2), "8.2 Innovation, superseded"),
+    ((8, 3), "8.3 Innovation, superseded"),
+    ((8, 4), "8.4 LTS, supported to Apr 2032"),
+    ((9, 0), "9.0 Innovation, superseded"),
+    ((9, 1), "9.1 Innovation, superseded"),
+    ((9, 2), "9.2 Innovation, superseded"),
+    ((9, 3), "9.3 Innovation, superseded"),
+];
+
+/// MariaDB's own calendar: LTS branches get five years, everything between
+/// them is a rolling release that lasts about one.
+const MARIADB_BRANCHES: &[((u32, u32), &str)] = &[
+    ((5, 1), "5.1 EOL since Feb 2012"),
+    ((5, 2), "5.2 EOL since Nov 2012"),
+    ((5, 3), "5.3 EOL since Mar 2014"),
+    ((5, 5), "5.5 EOL since Apr 2020"),
+    ((10, 0), "10.0 EOL since Mar 2019"),
+    ((10, 1), "10.1 EOL since Oct 2020"),
+    ((10, 2), "10.2 EOL since May 2022"),
+    ((10, 3), "10.3 EOL since May 2023"),
+    ((10, 4), "10.4 EOL since Jun 2024"),
+    ((10, 5), "10.5 EOL since Jun 2025"),
+    ((10, 6), "10.6 LTS, supported to Jul 2026"),
+    ((10, 7), "10.7 EOL since Feb 2023"),
+    ((10, 8), "10.8 EOL since May 2023"),
+    ((10, 9), "10.9 EOL since Aug 2023"),
+    ((10, 10), "10.10 EOL since Nov 2023"),
+    ((10, 11), "10.11 LTS, supported to Feb 2028"),
+    ((11, 0), "11.0 EOL since Jun 2024"),
+    ((11, 1), "11.1 EOL since Aug 2024"),
+    ((11, 2), "11.2 EOL since Nov 2024"),
+    ((11, 3), "11.3 EOL since Nov 2024"),
+    ((11, 4), "11.4 LTS, supported to May 2029"),
+    ((11, 5), "11.5 rolling release, superseded"),
+    ((11, 6), "11.6 rolling release, superseded"),
+    ((11, 7), "11.7 rolling release, superseded"),
+    ((11, 8), "11.8 LTS, supported to Jun 2030"),
+];
+
+/// `CLIENT_SSL`: the server will negotiate TLS if the client asks.
+const MYSQL_CLIENT_SSL: u32 = 0x0000_0800;
+/// `CLIENT_COMPRESS`: the server will accept the compressed protocol.
+const MYSQL_CLIENT_COMPRESS: u32 = 0x0000_0020;
 
 /// Strip Telnet IAC negotiation sequences, leaving the human-readable banner.
 fn strip_telnet(data: &[u8]) -> String {
@@ -2765,6 +3149,152 @@ mod tests {
         let mut info = ServiceInfo::default();
         parse_banner(port, line.as_bytes(), &mut info);
         info
+    }
+
+    /// A handshake packet as a real server sends it, so the parser is tested
+    /// against the byte layout and not against a convenient stub.
+    fn mysql_handshake(version: &str, plugin: &str, caps_low: u16, collation: u8) -> Vec<u8> {
+        let mut body = vec![0x0a];
+        body.extend_from_slice(version.as_bytes());
+        body.push(0);
+        body.extend_from_slice(&[1, 0, 0, 0]); // connection id
+        body.extend_from_slice(&[0x41; 8]); // salt part 1
+        body.push(0); // filler
+        body.extend_from_slice(&caps_low.to_le_bytes());
+        body.push(collation);
+        body.extend_from_slice(&[2, 0]); // status flags
+        body.extend_from_slice(&[0x0f, 0x80]); // capability flags, upper half
+        body.push(21); // salt length
+        body.extend_from_slice(&[0; 10]); // reserved
+        body.extend_from_slice(&[0x42; 12]); // salt part 2
+        body.push(0);
+        body.extend_from_slice(plugin.as_bytes());
+        body.push(0);
+        let len = body.len();
+        let mut pkt = vec![(len & 0xff) as u8, ((len >> 8) & 0xff) as u8, ((len >> 16) & 0xff) as u8, 0];
+        pkt.extend_from_slice(&body);
+        pkt
+    }
+
+    fn detect_mysql(version: &str) -> ServiceInfo {
+        let mut info = ServiceInfo::default();
+        // 0x0800 is CLIENT_SSL; every modern build offers it.
+        parse_banner(3306, &mysql_handshake(version, "caching_sha2_password", 0x0800, 255), &mut info);
+        info
+    }
+
+    // ── MySQL and everything else that answers on 3306 ──────────────────────
+
+    #[test]
+    fn mysql_handshake_names_branch_build_and_plugin() {
+        let info = detect_mysql("8.0.35-0ubuntu0.22.04.1");
+        assert_eq!(info.name, "mysql");
+        assert_eq!(info.product, "MySQL");
+        assert_eq!(info.version, "8.0.35");
+        assert!(info.extra.contains("8.0 EOL since Apr 2026"), "{}", info.extra);
+        assert!(info.extra.contains("0ubuntu0.22.04.1"), "{}", info.extra);
+        assert!(info.extra.contains("caching_sha2_password"), "{}", info.extra);
+        assert!(info.extra.contains("TLS supported"), "{}", info.extra);
+        assert_eq!(info.os_hint, "Linux (Ubuntu)");
+    }
+
+    #[test]
+    fn mariadb_strips_the_compatibility_prefix() {
+        let info = detect_mysql("5.5.5-10.11.6-MariaDB-1:10.11.6+maria~ubu2204-log");
+        assert_eq!(info.product, "MariaDB");
+        assert_eq!(info.version, "10.11.6");
+        assert!(info.extra.contains("10.11 LTS"), "{}", info.extra);
+        assert!(info.extra.contains("binlog enabled"), "{}", info.extra);
+    }
+
+    #[test]
+    fn a_fork_reports_its_own_version_not_the_one_it_emulates() {
+        let tidb = detect_mysql("8.0.11-TiDB-v7.5.0");
+        assert_eq!(tidb.product, "TiDB");
+        assert_eq!(tidb.version, "7.5.0");
+        // TiDB is not MySQL 8.0, so it must not inherit MySQL's calendar.
+        assert!(!tidb.extra.contains("EOL"), "{}", tidb.extra);
+
+        let aurora = detect_mysql("8.0.mysql_aurora.3.04.0");
+        assert_eq!(aurora.product, "Amazon Aurora MySQL");
+        assert_eq!(aurora.version, "3.04.0");
+
+        let vitess = detect_mysql("8.0.30-Vitess");
+        assert_eq!(vitess.product, "Vitess");
+        assert_eq!(vitess.version, "8.0.30");
+    }
+
+    #[test]
+    fn managed_rebuilds_keep_the_engine_name_so_findings_still_fire() {
+        for (version, product) in [
+            ("8.0.31-google", "Google Cloud SQL for MySQL"),
+            ("8.0.28-azure", "Azure Database for MySQL"),
+            ("8.0.32-polardb", "PolarDB for MySQL"),
+        ] {
+            let info = detect_mysql(version);
+            assert_eq!(info.product, product);
+            assert!(
+                info.product.contains("MySQL"),
+                "{product} must keep the substring vuln::assess matches on"
+            );
+            assert!(info.extra.contains("8.0 "), "{}", info.extra);
+        }
+    }
+
+    #[test]
+    fn an_end_of_life_branch_is_called_out() {
+        let old = detect_mysql("5.6.51-log");
+        assert_eq!(old.version, "5.6.51");
+        assert!(old.extra.contains("5.6 EOL since Feb 2021"), "{}", old.extra);
+        let lts = detect_mysql("8.4.2");
+        assert!(lts.extra.contains("8.4 LTS"), "{}", lts.extra);
+    }
+
+    #[test]
+    fn a_server_without_ssl_says_so() {
+        let mut info = ServiceInfo::default();
+        parse_banner(3306, &mysql_handshake("5.7.44-log", "mysql_native_password", 0x0000, 8), &mut info);
+        assert_eq!(info.version, "5.7.44");
+        assert!(info.extra.contains("no TLS offered"), "{}", info.extra);
+        assert!(info.extra.contains("latin1_swedish_ci"), "{}", info.extra);
+    }
+
+    #[test]
+    fn a_refusal_still_identifies_the_service() {
+        let msg = b"Host '10.0.0.7' is not allowed to connect to this MariaDB server";
+        let mut body = vec![0xff, 0x6a, 0x04]; // 0x046a = 1130
+        body.extend_from_slice(msg);
+        let mut pkt = vec![body.len() as u8, 0, 0, 0];
+        pkt.extend_from_slice(&body);
+        let mut info = ServiceInfo::default();
+        assert!(parse_mysql(&pkt, &mut info));
+        assert_eq!(info.product, "MariaDB");
+        assert!(info.extra.contains("host not allowed to connect"), "{}", info.extra);
+    }
+
+    #[test]
+    fn a_non_mysql_binary_greeting_is_not_claimed() {
+        let mut info = ServiceInfo::default();
+        assert!(!parse_mysql(&[0x10, 0x00, 0x00, 0x00, 0x33, 0x99, 0x01], &mut info));
+        assert!(info.product.is_empty());
+    }
+
+    #[test]
+    fn mysql_flavor_keys_are_lowercase_and_unique() {
+        let mut seen = std::collections::HashSet::new();
+        for (needle, product, own) in MYSQL_FLAVORS {
+            assert_eq!(
+                *needle,
+                needle.to_ascii_lowercase(),
+                "MYSQL_FLAVORS key {needle:?} ({product}) has upper case and can never match"
+            );
+            assert!(needle.len() >= 4, "MYSQL_FLAVORS key {needle:?} is too short to anchor on");
+            assert!(seen.insert(*needle), "MYSQL_FLAVORS key {needle:?} appears twice");
+            assert!(
+                own.is_empty() || needle.contains(own) || own.len() >= 4,
+                "MYSQL_FLAVORS marker {own:?} is too short to anchor on"
+            );
+        }
     }
 
     // ── table hygiene ───────────────────────────────────────────────────────
