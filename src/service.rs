@@ -210,7 +210,12 @@ pub async fn detect(addr: SocketAddr, default_name: &str, timeout_ms: u64, host:
 
     // Server-speaks-first protocols answer without prompting; give ports with
     // no active probe a longer window to say hello before we give up on them.
-    let listen_ms = if probe_bytes.is_some() { 400 } else { 900 };
+    // MySQL is why this scales with --timeout instead of being a fixed 900 ms:
+    // a server with `skip-name-resolve` off reverse-resolves the client address
+    // before it greets, and where that lookup has to time out first the
+    // handshake arrives seconds late — which showed up as an open 3306 with an
+    // empty VERSION column.
+    let listen_ms = if probe_bytes.is_some() { 400 } else { (dur.as_millis() as u64).max(900) };
 
     let mut stream = match timeout(dur, TcpStream::connect(addr)).await {
         Ok(Ok(s)) => s,
@@ -337,7 +342,12 @@ pub async fn detect_with_stream(
         _ => None,
     };
 
-    let listen_ms = if probe_bytes.is_some() { 400 } else { 900 };
+    // MySQL is why this scales with --timeout instead of being a fixed 900 ms:
+    // a server with `skip-name-resolve` off reverse-resolves the client address
+    // before it greets, and where that lookup has to time out first the
+    // handshake arrives seconds late — which showed up as an open 3306 with an
+    // empty VERSION column.
+    let listen_ms = if probe_bytes.is_some() { 400 } else { (dur.as_millis() as u64).max(900) };
     let mut data = read_for(&mut stream, Duration::from_millis(listen_ms), 8192).await;
 
     if data.is_empty() {
