@@ -22,7 +22,7 @@ asíncrono que escanea miles de puertos a la vez.
 > SYN `-sS`, ping ICMP, huella TCP/IP del sistema operativo) se degrada con un
 > aviso claro en vez de fallar.
 
-<img width="500" alt="Kaisen escaneando un host" src="https://github.com/user-attachments/assets/0908f363-7457-4ad0-914f-8dd10b3eba19" />
+<img width="1254" height="1254" alt="ChatGPT Image Aug 21, 2026, 06_36_50 PM" src="https://github.com/user-attachments/assets/54365994-7300-4585-b1e2-b93881ccde61" />
 
 ---
 
