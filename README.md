@@ -15,13 +15,6 @@ signature matcher**, and a complete **DNS resolver** — a `dig` replacement tha
 also speaks encrypted DNS — on an async engine that scans thousands of ports at
 once.
 
-> [!NOTE]
-> **No root needed.** The core engine uses unprivileged TCP `connect()` scans, so
-> Kaisen runs the same on an **unrooted Termux** phone, on **Kali**, on any Linux,
-> or on macOS. Features that normally require raw sockets (`-sS` SYN scan, ICMP
-> ping, TCP/IP OS fingerprinting) degrade gracefully with a clear notice instead
-> of failing.
-
 <img width="1254" height="1254" alt="ChatGPT Image Aug 21, 2026, 06_36_50 PM" src="https://github.com/user-attachments/assets/54365994-7300-4585-b1e2-b93881ccde61" />
 
 ---
@@ -855,6 +848,13 @@ exposes none of those, unprivileged detection can only narrow the family, and
 Kaisen says so rather than inventing a name.
 
 </details>
+
+> [!NOTE]
+> **No root needed.** The core engine uses unprivileged TCP `connect()` scans, so
+> Kaisen runs the same on an **unrooted Termux** phone, on **Kali**, on any Linux,
+> or on macOS. Features that normally require raw sockets (`-sS` SYN scan, ICMP
+> ping, TCP/IP OS fingerprinting) degrade gracefully with a clear notice instead
+> of failing.
 
 ---
 
