@@ -47,14 +47,26 @@ rather than guessing and presenting the guess as fact.</dd>
 
 ## ▍Install
 
+**Linux / macOS / Termux**
 ```sh
 curl -fsSL https://raw.githubusercontent.com/nostraxiten/kaisen/main/install.sh | sh
 ```
 
+**Windows (PowerShell)**
+```powershell
+irm https://raw.githubusercontent.com/nostraxiten/kaisen/main/install.ps1 | iex
+```
+
+> [!IMPORTANT]
+> **Windows compilation requires MSVC C++ Build Tools.** If the compilation fails with a `linker link.exe not found` error, run the following command in PowerShell as Administrator to install it:
+> ```powershell
+> winget install Microsoft.VisualStudio.2022.BuildTools --custom "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+> ```
+> Afterward, restart your PowerShell session and run the installation script again.
+
 The installer detects your system, installs a Rust toolchain if needed, builds
 the release binary, and drops `kaisen` / `kai` / `kaison` into a directory on
-your `PATH` — preferring a user-writable one, so **no sudo** is required on
-Termux or wherever `~/.local/bin` exists.
+your `PATH` — preferring a user-writable one, so **no admin/sudo** is required.
 
 <details>
 <summary><b>Termux, from source, and other platforms</b></summary>
@@ -78,7 +90,7 @@ cargo build --release
 # binary at target/release/kaisen
 ```
 
-Tested on Termux (unrooted), Kali, Debian/Ubuntu, Arch, Fedora, Alpine and
+Tested on Windows, Termux (unrooted), Kali, Debian/Ubuntu, Arch, Fedora, Alpine and
 macOS. Release builds are published for Linux x86-64/aarch64 (musl), Android
 aarch64, and macOS Intel/Apple Silicon.
 
