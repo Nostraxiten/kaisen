@@ -66,6 +66,13 @@ curl -fsSL https://raw.githubusercontent.com/nostraxiten/kaisen/main/install.sh 
 irm https://raw.githubusercontent.com/nostraxiten/kaisen/main/install.ps1 | iex
 ```
 
+> [!IMPORTANT]
+> **La compilación en Windows requiere MSVC C++ Build Tools.** Si la compilación falla con un error `linker link.exe not found`, ejecuta el siguiente comando en PowerShell como Administrador para instalarlo:
+> ```powershell
+> winget install Microsoft.VisualStudio.2022.BuildTools --custom "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+> ```
+> Después de esto, reinicia tu sesión de PowerShell y vuelve a ejecutar el script de instalación.
+
 El instalador detecta tu sistema, instala una cadena de herramientas de Rust si
 hace falta, compila el binario de release y deja `kaisen` / `kai` / `kaison` en
 un directorio de tu `PATH` — prefiriendo uno con permiso de escritura para tu
