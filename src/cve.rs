@@ -1229,7 +1229,7 @@ pub const CVE_DB: &[CveEntry] = &[
     },
     // ── Modern and High-Impact CVEs (2018-2026) ──────────────────────────
     CveEntry {
-        match_product: "Microsoft Outlook",
+        match_product: "Outlook",
         cpe: "cpe:2.3:a:microsoft:outlook",
         cve: "CVE-2024-21413",
         cvss: 9.8,

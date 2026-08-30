@@ -3070,6 +3070,9 @@ mod tests {
         // apply_tls records the negotiated protocol in `tls_version`, which
         // cve::correlate reads alongside the banner: "SSL 3.0", "TLS 1.2".
         "SSL 3.0",
+        // Windows and Java libraries/components often checked in banner/extra:
+        "Log4j",
+        "Netlogon",
     ];
 
     /// Every product string `service.rs`, `probe.rs`, `tls.rs` or `udp.rs` can
