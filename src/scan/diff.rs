@@ -19,7 +19,9 @@ pub struct PortInfo {
 #[derive(Debug, Clone, Default)]
 pub struct HostSnapshot {
     pub target: String,
+    #[allow(dead_code)]
     pub ip: String,
+    #[allow(dead_code)]
     pub os_guess: String,
     pub ports: BTreeMap<u16, PortInfo>,
 }

@@ -63,6 +63,7 @@ pub struct TlsInfo {
     pub expired: bool,
     pub self_signed: bool,
     pub sans: Vec<String>, // subject alternative DNS names (capped)
+    #[allow(dead_code)]
     pub chain_trusted: Option<bool>,
 }
 
@@ -766,7 +767,7 @@ pub async fn check_heartbleed(addr: SocketAddr, dur: Duration) -> bool {
             Ok(Ok(n)) if n > 0 => n,
             _ => break,
         };
-        if buf[..n].iter().any(|&b| b == 0x16) {
+        if buf[..n].contains(&0x16) {
             got_hello = true;
             break;
         }

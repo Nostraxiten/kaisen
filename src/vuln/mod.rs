@@ -2716,10 +2716,8 @@ pub async fn assess_active(
     let mut out = Vec::new();
 
     // Heartbleed active probe on TLS endpoints
-    if !svc.tls_version.is_empty() {
-        if crate::tls::check_heartbleed(addr, dur).await {
-            out.push(finding_from(active("CVE-2014-0160")));
-        }
+    if !svc.tls_version.is_empty() && crate::tls::check_heartbleed(addr, dur).await {
+        out.push(finding_from(active("CVE-2014-0160")));
     }
 
     // Meilisearch with no master key: every route is public.

@@ -8,6 +8,7 @@ use crate::util::output::Painter;
 
 #[derive(Debug, Clone)]
 pub struct Hop {
+    #[allow(dead_code)]
     pub ttl: u8,
     pub rtt: Option<Duration>,
     pub state: &'static str,
