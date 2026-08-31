@@ -1,6 +1,6 @@
 [package]
 name = "kaisen"
-version = "1.2.0"
+version = "1.3.0"
 edition = "2021"
 authors = ["Kaisen contributors"]
 description = "Kaisen — a fast nmap + dig hybrid network scanner that works without root"
