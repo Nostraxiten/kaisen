@@ -219,7 +219,7 @@ impl Default for Options {
             only_open: false,
             reason: false,
             firewall_check: false,
-            stream: true,
+            stream: false,
             no_ping: false,
             timing: Timing::from_template(3),
             ip_version: IpVersion::Any,
