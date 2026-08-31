@@ -58,4 +58,5 @@ impl From<&str> for KaisenError {
 }
 
 /// Alias conveniente para Results usando `KaisenError`.
+#[allow(dead_code)]
 pub type Result<T> = std::result::Result<T, KaisenError>;

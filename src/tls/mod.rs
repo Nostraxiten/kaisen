@@ -515,7 +515,7 @@ fn der_string(b: &[u8], i: usize) -> Option<String> {
     let s: String = if tag == 0x1e {
         // BMPString: UTF-16BE.
         b[start..end]
-            .chunks_exact(2)
+            .as_chunks::<2>().0.iter()
             .map(|c| ((c[0] as u16) << 8) | c[1] as u16)
             .filter_map(|u| char::from_u32(u as u32))
             .collect()

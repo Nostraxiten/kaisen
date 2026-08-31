@@ -1247,7 +1247,7 @@ fn svcb_param(key: u16, value: &[u8]) -> String {
     match key {
         0 => {
             let keys: Vec<String> = value
-                .chunks_exact(2)
+                .as_chunks::<2>().0.iter()
                 .map(|c| ((c[0] as u16) << 8 | c[1] as u16).to_string())
                 .collect();
             format!("mandatory={}", keys.join(","))
@@ -1277,7 +1277,7 @@ fn svcb_param(key: u16, value: &[u8]) -> String {
         ),
         4 => {
             let ips: Vec<String> = value
-                .chunks_exact(4)
+                .as_chunks::<4>().0.iter()
                 .map(|c| Ipv4Addr::new(c[0], c[1], c[2], c[3]).to_string())
                 .collect();
             format!("ipv4hint={}", ips.join(","))
@@ -1285,11 +1285,9 @@ fn svcb_param(key: u16, value: &[u8]) -> String {
         5 => format!("ech={} bytes", value.len()),
         6 => {
             let ips: Vec<String> = value
-                .chunks_exact(16)
+                .as_chunks::<16>().0.iter()
                 .map(|c| {
-                    let mut o = [0u8; 16];
-                    o.copy_from_slice(c);
-                    Ipv6Addr::from(o).to_string()
+                    Ipv6Addr::from(*c).to_string()
                 })
                 .collect();
             format!("ipv6hint={}", ips.join(","))
