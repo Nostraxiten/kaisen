@@ -246,7 +246,6 @@ pub enum OutputFormat {
     Xml,
 }
 
-
 impl Default for Options {
     fn default() -> Self {
         Options {
@@ -303,7 +302,6 @@ impl Default for Options {
         }
     }
 }
-
 
 /// Whether a bare token in DNS mode names a record type (dig-style
 /// `kaisen dns DNSKEY example.com`). Delegating to the resolver's own table
@@ -691,7 +689,9 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             }
             "--top-ports" => {
                 i += 1;
-                let v = args.get(i).ok_or("--top-ports requires a number or category")?;
+                let v = args
+                    .get(i)
+                    .ok_or("--top-ports requires a number or category")?;
                 if let Some(cat) = ports::category_ports(v) {
                     o.ports = cat.to_vec();
                     o.port_specs = o.ports.iter().map(|&p| ports::PortSpec::new(p)).collect();

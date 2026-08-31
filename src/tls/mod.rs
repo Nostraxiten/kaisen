@@ -21,11 +21,30 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 
 pub const WELL_KNOWN_CAS: &[&str] = &[
-    "Let's Encrypt", "ISRG Root", "DigiCert", "Sectigo", "GlobalSign",
-    "Amazon", "Google Trust Services", "GTS Root", "Cloudflare", "Microsoft",
-    "GoDaddy", "IdenTrust", "Baltimore CyberTrust", "Comodo", "Entrust",
-    "Trustwave", "Starfield", "Certum", "Actalis", "QuoVadis", "USERTrust",
-    "Buypass", "ZeroSSL", "SwissSign",
+    "Let's Encrypt",
+    "ISRG Root",
+    "DigiCert",
+    "Sectigo",
+    "GlobalSign",
+    "Amazon",
+    "Google Trust Services",
+    "GTS Root",
+    "Cloudflare",
+    "Microsoft",
+    "GoDaddy",
+    "IdenTrust",
+    "Baltimore CyberTrust",
+    "Comodo",
+    "Entrust",
+    "Trustwave",
+    "Starfield",
+    "Certum",
+    "Actalis",
+    "QuoVadis",
+    "USERTrust",
+    "Buypass",
+    "ZeroSSL",
+    "SwissSign",
 ];
 
 pub fn is_trusted_issuer(issuer: &str) -> bool {
@@ -80,7 +99,6 @@ impl TlsInfo {
         bits.join("; ")
     }
 }
-
 
 /// Connect-free probe: run a handshake over an already-open stream. Used both
 /// for plain TLS ports and for protocols that negotiate STARTTLS-style upgrades
@@ -727,9 +745,9 @@ pub async fn check_heartbleed(addr: SocketAddr, dur: Duration) -> bool {
         0x01, 0x00, 0x00, 0x2d, // ClientHello, len 45
         0x03, 0x02, // Client version: TLS 1.1
         // Random (32 bytes)
-        0x53, 0x43, 0x5b, 0x90, 0x9d, 0x9b, 0x72, 0x0b, 0xbc, 0x0c, 0xbc, 0x2b, 0x92, 0xa8, 0x48, 0x97,
-        0xcf, 0xbd, 0x39, 0x04, 0xcc, 0x16, 0x0a, 0x85, 0x03, 0x90, 0x9f, 0x77, 0x04, 0x33, 0xd4, 0xde,
-        0x00, // Session ID len 0
+        0x53, 0x43, 0x5b, 0x90, 0x9d, 0x9b, 0x72, 0x0b, 0xbc, 0x0c, 0xbc, 0x2b, 0x92, 0xa8, 0x48,
+        0x97, 0xcf, 0xbd, 0x39, 0x04, 0xcc, 0x16, 0x0a, 0x85, 0x03, 0x90, 0x9f, 0x77, 0x04, 0x33,
+        0xd4, 0xde, 0x00, // Session ID len 0
         0x00, 0x04, // Cipher suites len 4
         0x00, 0x2f, 0x00, 0x35, // TLS_RSA_WITH_AES_128_CBC_SHA, TLS_RSA_WITH_AES_256_CBC_SHA
         0x01, 0x00, // Compression methods (null)
@@ -771,10 +789,7 @@ pub async fn check_heartbleed(addr: SocketAddr, dur: Duration) -> bool {
 
     let mut resp_buf = vec![0u8; 8192];
     match timeout(dur, stream.read(&mut resp_buf)).await {
-        Ok(Ok(n)) if n > 5 => {
-            resp_buf[0] == 0x18 && n > 10
-        }
+        Ok(Ok(n)) if n > 5 => resp_buf[0] == 0x18 && n > 10,
         _ => false,
     }
 }
-

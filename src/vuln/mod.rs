@@ -2831,7 +2831,8 @@ pub async fn assess_active(
     // Spring4Shell active probe
     if hay.contains("spring") || hay.contains("whitelabel") || hay.contains("tomcat") {
         if let Some((code, body)) = get("/?class.module.classLoader.URLs%5B0%5D=0").await {
-            if code == 200 && (body.contains("org.springframework") || body.contains("whitelabel")) {
+            if code == 200 && (body.contains("org.springframework") || body.contains("whitelabel"))
+            {
                 out.push(finding_from(active("CVE-2022-22965")));
             }
         }

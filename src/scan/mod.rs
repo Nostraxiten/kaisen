@@ -179,7 +179,11 @@ async fn expand(
                 return Err("IPv6 CIDR range too large (min /48)".into());
             }
             let host_bits = 128 - prefix;
-            let count: u64 = if host_bits > 16 { 65536 } else { 1u64 << host_bits };
+            let count: u64 = if host_bits > 16 {
+                65536
+            } else {
+                1u64 << host_bits
+            };
             let base_u = u128::from(ip);
             let mask = if host_bits == 128 {
                 0u128
@@ -370,9 +374,12 @@ impl Pacer {
     /// most-informed lower bound and never bounce back up.
     fn observe(&self, latency: Duration) {
         let rtt = latency.as_millis() as u64;
-        self.observed_rtt_ms.store(rtt, std::sync::atomic::Ordering::Relaxed);
-        self.observed_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        self.total_rtt_ms.fetch_add(rtt, std::sync::atomic::Ordering::Relaxed);
+        self.observed_rtt_ms
+            .store(rtt, std::sync::atomic::Ordering::Relaxed);
+        self.observed_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.total_rtt_ms
+            .fetch_add(rtt, std::sync::atomic::Ordering::Relaxed);
         let target = rtt
             .saturating_mul(5)
             .saturating_add(80)
@@ -382,7 +389,9 @@ impl Pacer {
     }
 
     pub fn avg_rtt_ms(&self) -> f64 {
-        let cnt = self.observed_count.load(std::sync::atomic::Ordering::Relaxed);
+        let cnt = self
+            .observed_count
+            .load(std::sync::atomic::Ordering::Relaxed);
         if cnt > 0 {
             self.total_rtt_ms.load(std::sync::atomic::Ordering::Relaxed) as f64 / cnt as f64
         } else {
@@ -1042,9 +1051,12 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
         let pacer_for_rate = pacer.clone();
         tokio::spawn(async move {
             for _ in 0..total {
-                let observed = pacer_for_rate.observed_rtt_ms.load(std::sync::atomic::Ordering::Relaxed);
+                let observed = pacer_for_rate
+                    .observed_rtt_ms
+                    .load(std::sync::atomic::Ordering::Relaxed);
                 let rate = if observed > 0 {
-                    let scale = (timeout_ms as f64 / (observed as f64 * 3.0).max(10.0)).clamp(0.2, 5.0);
+                    let scale =
+                        (timeout_ms as f64 / (observed as f64 * 3.0).max(10.0)).clamp(0.2, 5.0);
                     ((base_rate as f64 * scale) as u32).max(1)
                 } else {
                     base_rate
@@ -1386,7 +1398,10 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
         .map(|d| d.as_secs())
         .unwrap_or(0);
     let avg_rtt_ms = pacer.avg_rtt_ms();
-    let timeouts = reports.iter().filter(|r| r.state == State::Filtered).count();
+    let timeouts = reports
+        .iter()
+        .filter(|r| r.state == State::Filtered)
+        .count();
 
     let mut report = HostReport {
         target: target.to_string(),
@@ -1505,7 +1520,7 @@ pub fn print_report(report: &HostReport, opts: &Options) {
         OutputFormat::Normal => print_normal(report, opts),
         OutputFormat::Grepable => print_grepable(report),
         OutputFormat::Json => print_json(report, opts), // printed per-host; wrapper handled by caller
-        OutputFormat::Xml => print_xml(report, opts),   // printed per-host; wrapper handled by caller
+        OutputFormat::Xml => print_xml(report, opts), // printed per-host; wrapper handled by caller
     }
 }
 
@@ -2571,24 +2586,48 @@ pub fn print_xml(report: &HostReport, opts: &Options) {
         return;
     }
 
-    println!("  <host starttime=\"{}\" endtime=\"{}\">", report.start_ts, report.end_ts);
+    println!(
+        "  <host starttime=\"{}\" endtime=\"{}\">",
+        report.start_ts, report.end_ts
+    );
     println!("    <status state=\"up\" reason=\"syn-ack\" reason_ttl=\"0\"/>");
-    println!("    <address addr=\"{}\" addrtype=\"{}\"/>", report.ip, addrtype);
+    println!(
+        "    <address addr=\"{}\" addrtype=\"{}\"/>",
+        report.ip, addrtype
+    );
     if let Some(mac) = &report.mac {
-        println!("    <address addr=\"{}\" addrtype=\"mac\"/>", xml_escape(mac));
+        println!(
+            "    <address addr=\"{}\" addrtype=\"mac\"/>",
+            xml_escape(mac)
+        );
     }
     println!("    <hostnames>");
-    println!("      <hostname name=\"{}\" type=\"user\"/>", xml_escape(&report.target));
+    println!(
+        "      <hostname name=\"{}\" type=\"user\"/>",
+        xml_escape(&report.target)
+    );
     println!("    </hostnames>");
     println!("    <ports>");
     if report.closed_count > 0 {
-        println!("      <extraports state=\"closed\" count=\"{}\">", report.closed_count);
-        println!("        <extrareasons reason=\"conn-refused\" count=\"{}\"/>", report.closed_count);
+        println!(
+            "      <extraports state=\"closed\" count=\"{}\">",
+            report.closed_count
+        );
+        println!(
+            "        <extrareasons reason=\"conn-refused\" count=\"{}\"/>",
+            report.closed_count
+        );
         println!("      </extraports>");
     }
     if report.filtered_count > 0 {
-        println!("      <extraports state=\"filtered\" count=\"{}\">", report.filtered_count);
-        println!("        <extrareasons reason=\"no-response\" count=\"{}\"/>", report.filtered_count);
+        println!(
+            "      <extraports state=\"filtered\" count=\"{}\">",
+            report.filtered_count
+        );
+        println!(
+            "        <extrareasons reason=\"no-response\" count=\"{}\"/>",
+            report.filtered_count
+        );
         println!("      </extraports>");
     }
 
@@ -2604,10 +2643,21 @@ pub fn print_xml(report: &HostReport, opts: &Options) {
             continue;
         }
 
-        println!("      <port protocol=\"{}\" portid=\"{}\">", r.proto, r.port);
-        println!("        <state state=\"{}\" reason=\"{}\" reason_ttl=\"0\"/>", r.state.label(), xml_escape(r.reason));
+        println!(
+            "      <port protocol=\"{}\" portid=\"{}\">",
+            r.proto, r.port
+        );
+        println!(
+            "        <state state=\"{}\" reason=\"{}\" reason_ttl=\"0\"/>",
+            r.state.label(),
+            xml_escape(r.reason)
+        );
         if let Some(svc) = &r.service {
-            let name = if svc.name.is_empty() { service_name(r.port) } else { &svc.name };
+            let name = if svc.name.is_empty() {
+                service_name(r.port)
+            } else {
+                &svc.name
+            };
             let mut svc_attrs = format!("name=\"{}\"", xml_escape(name));
             if !svc.product.is_empty() {
                 svc_attrs.push_str(&format!(" product=\"{}\"", xml_escape(&svc.product)));
@@ -2640,12 +2690,19 @@ pub fn print_xml(report: &HostReport, opts: &Options) {
 
     if opts.os_detection && !report.os_guess.is_empty() && report.os_guess != "unknown" {
         println!("    <os>");
-        println!("      <osmatch name=\"{}\" accuracy=\"90\" line=\"1000\"/>", xml_escape(&report.os_guess));
+        println!(
+            "      <osmatch name=\"{}\" accuracy=\"90\" line=\"1000\"/>",
+            xml_escape(&report.os_guess)
+        );
         println!("    </os>");
     }
 
     let srtt_us = (report.avg_rtt_ms * 1000.0) as u64;
-    println!("    <times srtt=\"{}\" rttvar=\"5000\" to=\"{}\"/>", srtt_us, (report.elapsed.as_micros()).min(u64::MAX as u128));
+    println!(
+        "    <times srtt=\"{}\" rttvar=\"5000\" to=\"{}\"/>",
+        srtt_us,
+        (report.elapsed.as_micros()).min(u64::MAX as u128)
+    );
     println!("  </host>");
 }
 
@@ -2940,18 +2997,24 @@ mod tests {
 
     #[tokio::test]
     async fn test_ipv6_cidr_expansion() {
-        let addrs = expand("2001:db8::/126", IpVersion::V6, false).await.unwrap();
+        let addrs = expand("2001:db8::/126", IpVersion::V6, false)
+            .await
+            .unwrap();
         assert_eq!(addrs.len(), 4);
         assert_eq!(addrs[0].0, "2001:db8::");
         assert_eq!(addrs[3].0, "2001:db8::3");
 
         // Single host prefix
-        let single = expand("2001:db8::1/128", IpVersion::Any, false).await.unwrap();
+        let single = expand("2001:db8::1/128", IpVersion::Any, false)
+            .await
+            .unwrap();
         assert_eq!(single.len(), 1);
         assert_eq!(single[0].0, "2001:db8::1");
 
         // Capped /64
-        let capped = expand("2001:db8::/64", IpVersion::Any, false).await.unwrap();
+        let capped = expand("2001:db8::/64", IpVersion::Any, false)
+            .await
+            .unwrap();
         assert_eq!(capped.len(), 65536);
 
         // Filtered out by -4
@@ -2961,7 +3024,9 @@ mod tests {
 
     #[test]
     fn test_xml_escape_and_output() {
-        assert_eq!(crate::util::output::xml_escape("<>&\"'"), "&lt;&gt;&amp;&quot;&apos;");
+        assert_eq!(
+            crate::util::output::xml_escape("<>&\"'"),
+            "&lt;&gt;&amp;&quot;&apos;"
+        );
     }
 }
-

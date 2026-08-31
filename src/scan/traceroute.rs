@@ -15,7 +15,14 @@ pub struct Hop {
 }
 
 /// Trace TCP route to target IP and port by incrementing IP_TTL.
-pub async fn run_traceroute(target: &str, ip: IpAddr, port: u16, max_hops: u8, timeout_ms: u64, color: bool) {
+pub async fn run_traceroute(
+    target: &str,
+    ip: IpAddr,
+    port: u16,
+    max_hops: u8,
+    timeout_ms: u64,
+    color: bool,
+) {
     let p = Painter::new(color);
     println!();
     println!(
@@ -27,7 +34,12 @@ pub async fn run_traceroute(target: &str, ip: IpAddr, port: u16, max_hops: u8, t
         max_hops
     );
     println!();
-    println!("  {:<4}  {:<12}  {}", p.bold("HOP"), p.bold("RTT"), p.bold("STATUS"));
+    println!(
+        "  {:<4}  {:<12}  {}",
+        p.bold("HOP"),
+        p.bold("RTT"),
+        p.bold("STATUS")
+    );
     println!("  ----------------------------------------");
 
     let timeout_dur = Duration::from_millis(timeout_ms.max(500));
@@ -50,13 +62,19 @@ pub async fn run_traceroute(target: &str, ip: IpAddr, port: u16, max_hops: u8, t
 
         if hop.reached {
             println!();
-            println!("{}", p.green(&format!("Destination reached in {ttl} hop(s).")));
+            println!(
+                "{}",
+                p.green(&format!("Destination reached in {ttl} hop(s)."))
+            );
             return;
         }
     }
 
     println!();
-    println!("{}", p.dim(&format!("Trace completed ({max_hops} hops probed).")));
+    println!(
+        "{}",
+        p.dim(&format!("Trace completed ({max_hops} hops probed)."))
+    );
 }
 
 async fn probe_hop(ip: IpAddr, port: u16, ttl: u8, timeout_dur: Duration) -> Hop {
@@ -69,10 +87,19 @@ async fn probe_hop(ip: IpAddr, port: u16, ttl: u8, timeout_dur: Duration) -> Hop
         } else {
             socket2::Domain::IPV6
         };
-        let socket = match socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP)) {
-            Ok(s) => s,
-            Err(_) => return Hop { ttl, rtt: None, state: "socket-error", reached: false },
-        };
+        let socket =
+            match socket2::Socket::new(domain, socket2::Type::STREAM, Some(socket2::Protocol::TCP))
+            {
+                Ok(s) => s,
+                Err(_) => {
+                    return Hop {
+                        ttl,
+                        rtt: None,
+                        state: "socket-error",
+                        reached: false,
+                    }
+                }
+            };
 
         // Set IP_TTL / unicast hops
         if ip.is_ipv4() {
@@ -139,7 +166,12 @@ async fn probe_hop(ip: IpAddr, port: u16, ttl: u8, timeout_dur: Duration) -> Hop
 
     match res {
         Ok(h) => h,
-        Err(_) => Hop { ttl, rtt: None, state: "error", reached: false },
+        Err(_) => Hop {
+            ttl,
+            rtt: None,
+            state: "error",
+            reached: false,
+        },
     }
 }
 
@@ -159,4 +191,3 @@ fn libc_pollfd(socket: socket2::Socket, timeout_dur: Duration) -> bool {
     }
     false
 }
-

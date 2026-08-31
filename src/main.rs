@@ -110,7 +110,6 @@ async fn main() -> ExitCode {
     }
 }
 
-
 async fn run_nsaudit(opts: &Options) -> ExitCode {
     let p = Painter::new(opts.color);
     if opts.targets.is_empty() {
@@ -396,7 +395,9 @@ async fn run_scan(opts_in: &Options) -> ExitCode {
     } else if xml {
         println!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
         println!("<!DOCTYPE nmaprun>");
-        println!("<?xml-stylesheet href=\"file:///usr/bin/../share/nmap/nmap.xsl\" type=\"text/xsl\"?>");
+        println!(
+            "<?xml-stylesheet href=\"file:///usr/bin/../share/nmap/nmap.xsl\" type=\"text/xsl\"?>"
+        );
         println!(
             "<nmaprun scanner=\"kaisen\" args=\"kaisen\" start=\"{}\" version=\"{}\" xmloutputversion=\"1.05\">",
             sweep_start_time,
@@ -442,7 +443,8 @@ async fn run_scan(opts_in: &Options) -> ExitCode {
         let mut list = Vec::with_capacity(total);
         for (idx, (target, ip)) in hosts.into_iter().enumerate() {
             if idx > 0 && opts.timing.host_delay_ms > 0 {
-                tokio::time::sleep(std::time::Duration::from_millis(opts.timing.host_delay_ms)).await;
+                tokio::time::sleep(std::time::Duration::from_millis(opts.timing.host_delay_ms))
+                    .await;
             }
             let report = scan::scan_host(&target, ip, opts, alive[idx]).await;
             list.push((idx, report));
@@ -487,11 +489,15 @@ async fn run_scan(opts_in: &Options) -> ExitCode {
             up_count,
             elapsed_s
         );
-        println!("  <hosts up=\"{}\" down=\"{}\" total=\"{}\"/>", up_count, total - up_count, total);
+        println!(
+            "  <hosts up=\"{}\" down=\"{}\" total=\"{}\"/>",
+            up_count,
+            total - up_count,
+            total
+        );
         println!("</runstats>");
         println!("</nmaprun>");
     }
-
 
     // Recuento al estilo nmap: con muchos objetivos y hosts mayormente silenciosos
     // omitidos del informe anterior, este es el único lugar donde su recuento aparece.
@@ -508,51 +514,56 @@ async fn run_scan(opts_in: &Options) -> ExitCode {
 
     if let Some(prev_file) = &opts.diff_file {
         match std::fs::read_to_string(prev_file) {
-            Ok(prev_content) => {
-                match scan::diff::parse_json_report(&prev_content) {
-                    Ok(prev_snap) => {
-                        let mut curr_snap = std::collections::BTreeMap::new();
-                        for (_, report) in &sorted_reports {
-                            let mut ports_map = std::collections::BTreeMap::new();
-                            for r in &report.ports {
-                                let svc = r.service.as_ref();
-                                ports_map.insert(
-                                    r.port,
-                                    scan::diff::PortInfo {
-                                        port: r.port,
-                                        proto: r.proto.to_string(),
-                                        state: r.state.label().to_string(),
-                                        service: svc.map(|s| s.name.clone()).unwrap_or_else(|| ports::service_name(r.port).to_string()),
-                                        product: svc.map(|s| s.product.clone()).unwrap_or_default(),
-                                        version: svc.map(|s| s.version.clone()).unwrap_or_default(),
-                                        findings: r.findings.iter().map(|f| f.id.clone()).collect(),
-                                    },
-                                );
-                            }
-                            curr_snap.insert(
-                                report.ip.to_string(),
-                                scan::diff::HostSnapshot {
-                                    target: report.target.clone(),
-                                    ip: report.ip.to_string(),
-                                    os_guess: report.os_guess.clone(),
-                                    ports: ports_map,
+            Ok(prev_content) => match scan::diff::parse_json_report(&prev_content) {
+                Ok(prev_snap) => {
+                    let mut curr_snap = std::collections::BTreeMap::new();
+                    for (_, report) in &sorted_reports {
+                        let mut ports_map = std::collections::BTreeMap::new();
+                        for r in &report.ports {
+                            let svc = r.service.as_ref();
+                            ports_map.insert(
+                                r.port,
+                                scan::diff::PortInfo {
+                                    port: r.port,
+                                    proto: r.proto.to_string(),
+                                    state: r.state.label().to_string(),
+                                    service: svc
+                                        .map(|s| s.name.clone())
+                                        .unwrap_or_else(|| ports::service_name(r.port).to_string()),
+                                    product: svc.map(|s| s.product.clone()).unwrap_or_default(),
+                                    version: svc.map(|s| s.version.clone()).unwrap_or_default(),
+                                    findings: r.findings.iter().map(|f| f.id.clone()).collect(),
                                 },
                             );
                         }
-                        let diffs = scan::diff::diff_snapshots(&prev_snap, &curr_snap);
-                        scan::diff::print_diff_report(&diffs, opts.color);
+                        curr_snap.insert(
+                            report.ip.to_string(),
+                            scan::diff::HostSnapshot {
+                                target: report.target.clone(),
+                                ip: report.ip.to_string(),
+                                os_guess: report.os_guess.clone(),
+                                ports: ports_map,
+                            },
+                        );
                     }
-                    Err(e) => {
-                        eprintln!("{}", p.red(&format!("kaisen diff: failed to parse {prev_file}: {e}")));
-                    }
+                    let diffs = scan::diff::diff_snapshots(&prev_snap, &curr_snap);
+                    scan::diff::print_diff_report(&diffs, opts.color);
                 }
-            }
+                Err(e) => {
+                    eprintln!(
+                        "{}",
+                        p.red(&format!("kaisen diff: failed to parse {prev_file}: {e}"))
+                    );
+                }
+            },
             Err(e) => {
-                eprintln!("{}", p.red(&format!("kaisen diff: failed to read {prev_file}: {e}")));
+                eprintln!(
+                    "{}",
+                    p.red(&format!("kaisen diff: failed to read {prev_file}: {e}"))
+                );
             }
         }
     }
-
 
     if any_open {
         ExitCode::SUCCESS
@@ -592,7 +603,6 @@ async fn run_path(opts: &Options) -> ExitCode {
     }
     ExitCode::SUCCESS
 }
-
 
 async fn run_dns(opts: &Options) -> ExitCode {
     let p = Painter::new(opts.color);

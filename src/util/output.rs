@@ -80,4 +80,3 @@ pub fn xml_escape(s: &str) -> String {
     }
     out
 }
-

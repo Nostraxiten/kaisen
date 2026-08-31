@@ -92,7 +92,9 @@ pub fn parse_json_report(json: &str) -> Result<BTreeMap<String, HostSnapshot>, S
                                         let fin = &f_rest[fb + 1..fe];
                                         let fobjs = split_json_objects(fin);
                                         for fo in fobjs {
-                                            if let Some(fid) = crate::service::probe::json_str(&fo, "id") {
+                                            if let Some(fid) =
+                                                crate::service::probe::json_str(&fo, "id")
+                                            {
                                                 findings.push(fid);
                                             }
                                         }
@@ -311,12 +313,7 @@ pub fn print_diff_report(diffs: &[HostDiff], color: bool) {
         }
 
         for (port, vuln) in &d.resolved_findings {
-            println!(
-                "  {} {:<6} {}",
-                p.green("[v] RESOLVED:"),
-                port,
-                p.dim(vuln)
-            );
+            println!("  {} {:<6} {}", p.green("[v] RESOLVED:"), port, p.dim(vuln));
         }
     }
 
