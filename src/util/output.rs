@@ -64,3 +64,19 @@ pub fn json_escape(s: &str) -> String {
     }
     out
 }
+
+/// Escapa una cadena para incrustarla en atributos o texto XML.
+pub fn xml_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    for c in s.chars() {
+        match c {
+            '&' => out.push_str("&amp;"),
+            '<' => out.push_str("&lt;"),
+            '>' => out.push_str("&gt;"),
+            '"' => out.push_str("&quot;"),
+            '\'' => out.push_str("&apos;"),
+            c => out.push(c),
+        }
+    }
+    out
+}

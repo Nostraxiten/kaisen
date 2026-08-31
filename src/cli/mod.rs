@@ -19,6 +19,8 @@ pub enum Mode {
     Whois,
     Neighbor,
     NsAudit,
+    /// `kaisen path <ip>` — TCP traceroute via IP_TTL.
+    Path,
     /// --vuln-list: imprime la base de datos de firmas y sale sin tocar nada.
     VulnList,
     Help,
@@ -228,6 +230,12 @@ pub struct Options {
     pub help_topic: Option<String>,
     /// `--ayuda`: Spanish help flag
     pub help_spanish: bool,
+    /// `--diff <file>`: Compare scan results against a previous JSON report.
+    pub diff_file: Option<String>,
+    /// Max hops for `path` / traceroute mode.
+    pub max_hops: u8,
+    /// Destination port for `path` / traceroute mode.
+    pub path_port: u16,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -235,6 +243,7 @@ pub enum OutputFormat {
     Normal,
     Json,
     Grepable,
+    Xml,
 }
 
 impl Default for Options {
@@ -287,6 +296,9 @@ impl Default for Options {
             dns_doh: None,
             help_topic: None,
             help_spanish: false,
+            diff_file: None,
+            max_hops: 30,
+            path_port: 80,
         }
     }
 }
@@ -392,6 +404,12 @@ const KNOWN_FLAGS: &[&str] = &[
     "--output-normal",
     "--json",
     "--grepable",
+    "--xml",
+    "--output-xml",
+    "--diff",
+    "--max-hops",
+    "--hops",
+    "--path-port",
     "--no-color",
     "--color",
     "--dns",
@@ -445,6 +463,7 @@ const KNOWN_FLAGS: &[&str] = &[
     "-oN",
     "-oJ",
     "-oG",
+    "-oX",
     "-4",
     "-6",
     "-T0",
@@ -581,6 +600,10 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                 o.mode = Mode::NsAudit;
                 i = 1;
             }
+            "path" | "traceroute" | "tracepath" | "trace" => {
+                o.mode = Mode::Path;
+                i = 1;
+            }
             "scan" => {
                 o.mode = Mode::Scan;
                 i = 1;
@@ -666,8 +689,16 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             }
             "--top-ports" => {
                 i += 1;
-                let v = args.get(i).ok_or("--top-ports requires a number")?;
-                want_top = Some(v.parse().map_err(|_| "invalid --top-ports value")?);
+                let v = args
+                    .get(i)
+                    .ok_or("--top-ports requires a number or category")?;
+                if let Some(cat) = ports::category_ports(v) {
+                    o.ports = cat.to_vec();
+                    o.port_specs = o.ports.iter().map(|&p| ports::PortSpec::new(p)).collect();
+                    o.ports_explicit = true;
+                } else {
+                    want_top = Some(v.parse().map_err(|_| "invalid --top-ports value (expected number or category: web, db, iot, cloud, mail, ot)")?);
+                }
                 o.ports_selected = true;
             }
             "-p" | "--ports" => {
@@ -813,6 +844,22 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             "-oN" | "--output-normal" => o.output = OutputFormat::Normal,
             "-oJ" | "--json" => o.output = OutputFormat::Json,
             "-oG" | "--grepable" => o.output = OutputFormat::Grepable,
+            "-oX" | "--xml" | "--output-xml" => o.output = OutputFormat::Xml,
+            "--diff" => {
+                i += 1;
+                let v = args.get(i).ok_or("--diff requires a JSON report file")?;
+                o.diff_file = Some(v.to_string());
+            }
+            "--max-hops" | "--hops" => {
+                i += 1;
+                let v = args.get(i).ok_or("--max-hops requires a number")?;
+                o.max_hops = v.parse().map_err(|_| "invalid --max-hops value")?;
+            }
+            "--path-port" => {
+                i += 1;
+                let v = args.get(i).ok_or("--path-port requires a port")?;
+                o.path_port = v.parse().map_err(|_| "invalid --path-port value")?;
+            }
             "--no-color" => o.color = false,
             "--color" => o.color = true,
             "-4" => o.ip_version = IpVersion::V4,

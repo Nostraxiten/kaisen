@@ -3,12 +3,14 @@
 //! de servicio/versión/SO/vuln, y renderizado de resultados en formato
 //! normal / JSON / grepable.
 
+pub mod diff;
 pub mod mail;
 pub mod neigh;
 pub mod osfp;
+pub mod traceroute;
 pub mod udp;
 
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
 use futures::stream::{self, StreamExt};
@@ -18,7 +20,7 @@ use tokio::time::timeout;
 use crate::cli::{IpVersion, Options, OutputFormat, ScanKind};
 use crate::ports::service_name;
 use crate::service::{self, ServiceInfo};
-use crate::util::output::{json_escape, Painter};
+use crate::util::output::{json_escape, xml_escape, Painter};
 use crate::vuln::{self, Finding, Severity};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,7 +34,7 @@ pub enum State {
 }
 
 impl State {
-    fn label(&self) -> &'static str {
+    pub fn label(&self) -> &'static str {
         match self {
             State::Open => "open",
             State::Closed => "closed",
@@ -106,6 +108,14 @@ pub struct HostReport {
     pub firewall: Option<FirewallProbe>,
     /// Count of live streaming lines emitted to stderr during the scan of this host.
     pub live_lines: usize,
+    /// Unix timestamp when host scanning began.
+    pub start_ts: u64,
+    /// Unix timestamp when host scanning completed.
+    pub end_ts: u64,
+    /// Average observed round-trip time in milliseconds (learned via Pacer).
+    pub avg_rtt_ms: f64,
+    /// Count of timed-out (filtered) port probes.
+    pub timeouts: usize,
 }
 
 /// Expand a target string into concrete IPs. Supports hostname, IPv4/IPv6, and
@@ -151,11 +161,49 @@ async fn expand(
             let mut out = Vec::new();
             for i in 0..count as u32 {
                 let addr = Ipv4Addr::from(start.wrapping_add(i));
-                out.push((addr.to_string(), IpAddr::V4(addr)));
+                if ip_matches(IpAddr::V4(addr), ipv) {
+                    out.push((addr.to_string(), IpAddr::V4(addr)));
+                }
+            }
+            if out.is_empty() {
+                return Err("target IP version filtered by -4/-6".into());
             }
             return Ok(out);
         }
-        return Err("only IPv4 CIDR is supported".into());
+        if let Ok(ip) = base.parse::<Ipv6Addr>() {
+            let prefix: u32 = prefix.parse().map_err(|_| "invalid CIDR prefix")?;
+            if prefix > 128 {
+                return Err("IPv6 CIDR prefix out of range".into());
+            }
+            if prefix < 48 {
+                return Err("IPv6 CIDR range too large (min /48)".into());
+            }
+            let host_bits = 128 - prefix;
+            let count: u64 = if host_bits > 16 {
+                65536
+            } else {
+                1u64 << host_bits
+            };
+            let base_u = u128::from(ip);
+            let mask = if host_bits == 128 {
+                0u128
+            } else {
+                base_u & !((1u128 << host_bits).wrapping_sub(1))
+            };
+            let start = if host_bits == 128 { base_u } else { mask };
+            let mut out = Vec::new();
+            for i in 0..count {
+                let addr = Ipv6Addr::from(start.wrapping_add(i as u128));
+                if ip_matches(IpAddr::V6(addr), ipv) {
+                    out.push((addr.to_string(), IpAddr::V6(addr)));
+                }
+            }
+            if out.is_empty() {
+                return Err("target IP version filtered by -4/-6".into());
+            }
+            return Ok(out);
+        }
+        return Err("invalid CIDR address".into());
     }
 
     // Literal IP?
@@ -295,6 +343,10 @@ pub struct Pacer {
     /// Never wait less than this, so a genuinely slow-but-alive port on a
     /// jittery link isn't misread as filtered.
     floor_ms: u64,
+    /// Most recent observed latency in milliseconds.
+    pub observed_rtt_ms: std::sync::atomic::AtomicU64,
+    observed_count: std::sync::atomic::AtomicUsize,
+    total_rtt_ms: std::sync::atomic::AtomicU64,
 }
 
 impl Pacer {
@@ -306,6 +358,9 @@ impl Pacer {
             eff_ms: std::sync::atomic::AtomicU64::new(template_ms),
             ceiling_ms: template_ms,
             floor_ms: floor,
+            observed_rtt_ms: std::sync::atomic::AtomicU64::new(0),
+            observed_count: std::sync::atomic::AtomicUsize::new(0),
+            total_rtt_ms: std::sync::atomic::AtomicU64::new(0),
         }
     }
 
@@ -319,12 +374,29 @@ impl Pacer {
     /// most-informed lower bound and never bounce back up.
     fn observe(&self, latency: Duration) {
         let rtt = latency.as_millis() as u64;
+        self.observed_rtt_ms
+            .store(rtt, std::sync::atomic::Ordering::Relaxed);
+        self.observed_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.total_rtt_ms
+            .fetch_add(rtt, std::sync::atomic::Ordering::Relaxed);
         let target = rtt
             .saturating_mul(5)
             .saturating_add(80)
             .clamp(self.floor_ms, self.ceiling_ms);
         self.eff_ms
             .fetch_min(target, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    pub fn avg_rtt_ms(&self) -> f64 {
+        let cnt = self
+            .observed_count
+            .load(std::sync::atomic::Ordering::Relaxed);
+        if cnt > 0 {
+            self.total_rtt_ms.load(std::sync::atomic::Ordering::Relaxed) as f64 / cnt as f64
+        } else {
+            0.0
+        }
     }
 }
 
@@ -847,6 +919,10 @@ pub async fn discover_alive(hosts: &[(String, IpAddr)], opts: &Options) -> Vec<b
 /// failed to answer anything.
 pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bool) -> HostReport {
     let start = Instant::now();
+    let start_ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
 
     if !opts.no_ping && !known_alive {
         return HostReport {
@@ -867,6 +943,10 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
             device_signals: Vec::new(),
             firewall: None,
             live_lines: 0,
+            start_ts,
+            end_ts: start_ts,
+            avg_rtt_ms: 0.0,
+            timeouts: 0,
         };
     }
 
@@ -902,6 +982,10 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
                 device_signals: Vec::new(),
                 firewall: Some(probe),
                 live_lines: 0,
+                start_ts,
+                end_ts: start_ts,
+                avg_rtt_ms: 0.0,
+                timeouts: 0,
             };
         }
         Some(probe)
@@ -949,18 +1033,35 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
     let prog = Progress::start(&format!("{ip} ports"), ports.len(), opts);
     let counter = prog.counter();
 
+    // Adaptive connect-timeout for this host: shared across every probe in the
+    // sweep so the first answer shortens the wait for all the silent ports.
+    let pacer = std::sync::Arc::new(Pacer::new(timeout_ms));
+
     // Token-bucket rate limiter: when max_rate > 0, a background task releases
     // one permit every (1000 / max_rate) ms, capping how fast new TCP SYNs are
     // sent. This prevents zombie conntrack entries from accumulating in home
     // routers faster than they can expire (router's syn_sent timeout ≈ 60-120s).
+    // Dynamic rate scaling (Mejora 5): LAN hosts with small RTT can safely receive
+    // higher packet rates without conntrack overflow.
     let rate_sem: Option<std::sync::Arc<tokio::sync::Semaphore>> = if opts.timing.max_rate > 0 {
         let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
         let sem2 = sem.clone();
-        let rate = opts.timing.max_rate;
+        let base_rate = opts.timing.max_rate;
         let total = ports.len();
+        let pacer_for_rate = pacer.clone();
         tokio::spawn(async move {
-            let interval_ms = (1000u64).div_ceil(rate as u64);
             for _ in 0..total {
+                let observed = pacer_for_rate
+                    .observed_rtt_ms
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                let rate = if observed > 0 {
+                    let scale =
+                        (timeout_ms as f64 / (observed as f64 * 3.0).max(10.0)).clamp(0.2, 5.0);
+                    ((base_rate as f64 * scale) as u32).max(1)
+                } else {
+                    base_rate
+                };
+                let interval_ms = (1000u64).div_ceil(rate as u64);
                 tokio::time::sleep(Duration::from_millis(interval_ms)).await;
                 sem2.add_permits(1);
             }
@@ -982,10 +1083,6 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
     } else {
         None
     };
-
-    // Adaptive connect-timeout for this host: shared across every probe in the
-    // sweep so the first answer shortens the wait for all the silent ports.
-    let pacer = std::sync::Arc::new(Pacer::new(timeout_ms));
 
     let sweep = stream::iter(ports.clone())
         .map(|port| {
@@ -1296,6 +1393,16 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
         None
     };
 
+    let end_ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let avg_rtt_ms = pacer.avg_rtt_ms();
+    let timeouts = reports
+        .iter()
+        .filter(|r| r.state == State::Filtered)
+        .count();
+
     let mut report = HostReport {
         target: target.to_string(),
         ip,
@@ -1314,6 +1421,10 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
         device_signals: Vec::new(),
         firewall: fw_precheck,
         live_lines: live_counter.load(std::sync::atomic::Ordering::Relaxed),
+        start_ts,
+        end_ts,
+        avg_rtt_ms,
+        timeouts,
     };
 
     // Phase 4: combine every signal into a single OS guess string.
@@ -1409,6 +1520,7 @@ pub fn print_report(report: &HostReport, opts: &Options) {
         OutputFormat::Normal => print_normal(report, opts),
         OutputFormat::Grepable => print_grepable(report),
         OutputFormat::Json => print_json(report, opts), // printed per-host; wrapper handled by caller
+        OutputFormat::Xml => print_xml(report, opts), // printed per-host; wrapper handled by caller
     }
 }
 
@@ -2356,10 +2468,16 @@ fn web_json(w: Option<&crate::service::web::WebProfile>) -> String {
 fn print_json(report: &HostReport, opts: &Options) {
     if !report.host_up {
         println!(
-            "{{\"target\":\"{}\",\"ip\":\"{}\",\"host_up\":false,\"os_guess\":\"\",\"elapsed_s\":{:.3},\"ports\":[]}}",
+            "{{\"target\":\"{}\",\"ip\":\"{}\",\"host_up\":false,\"os_guess\":\"\",\"elapsed_s\":{:.3},\
+             \"counts\":{{\"open\":0,\"closed\":0,\"filtered\":0}},\
+             \"scan_meta\":{{\"start_ts\":{},\"end_ts\":{},\"duration_ms\":{},\"ports_scanned\":0,\"avg_rtt_ms\":0.0,\"timeouts\":0}},\
+             \"ports\":[]}}",
             json_escape(&report.target),
             report.ip,
-            report.elapsed.as_secs_f64()
+            report.elapsed.as_secs_f64(),
+            report.start_ts,
+            report.end_ts,
+            report.elapsed.as_millis()
         );
         return;
     }
@@ -2430,7 +2548,10 @@ fn print_json(report: &HostReport, opts: &Options) {
     println!(
         "{{\"target\":\"{}\",\"ip\":\"{}\",\"host_up\":true,\"os_guess\":\"{}\",\
          \"syn_ack_unverified\":{},\"firewall_blocked\":{},\"elapsed_s\":{:.3},\
-         \"counts\":{{\"open\":{},\"closed\":{},\"filtered\":{}}},\"ports\":[{}]}}",
+         \"counts\":{{\"open\":{},\"closed\":{},\"filtered\":{}}},\
+         \"scan_meta\":{{\"start_ts\":{},\"end_ts\":{},\"duration_ms\":{},\"ports_scanned\":{},\
+         \"avg_rtt_ms\":{:.1},\"timeouts\":{}}},\
+         \"ports\":[{}]}}",
         json_escape(&report.target),
         report.ip,
         json_escape(&report.os_guess),
@@ -2440,8 +2561,149 @@ fn print_json(report: &HostReport, opts: &Options) {
         report.open_count,
         report.closed_count,
         report.filtered_count,
+        report.start_ts,
+        report.end_ts,
+        report.elapsed.as_millis(),
+        report.ports.len(),
+        report.avg_rtt_ms,
+        report.timeouts,
         ports_json.join(",")
     );
+}
+
+/// Print one host's findings in standard nmap-compatible XML format.
+pub fn print_xml(report: &HostReport, opts: &Options) {
+    let addrtype = if report.ip.is_ipv4() { "ipv4" } else { "ipv6" };
+    if !report.host_up {
+        println!(
+            "  <host starttime=\"{}\" endtime=\"{}\"><status state=\"down\" reason=\"no-response\"/><address addr=\"{}\" addrtype=\"{}\"/><hostnames><hostname name=\"{}\" type=\"user\"/></hostnames></host>",
+            report.start_ts,
+            report.end_ts,
+            report.ip,
+            addrtype,
+            xml_escape(&report.target)
+        );
+        return;
+    }
+
+    println!(
+        "  <host starttime=\"{}\" endtime=\"{}\">",
+        report.start_ts, report.end_ts
+    );
+    println!("    <status state=\"up\" reason=\"syn-ack\" reason_ttl=\"0\"/>");
+    println!(
+        "    <address addr=\"{}\" addrtype=\"{}\"/>",
+        report.ip, addrtype
+    );
+    if let Some(mac) = &report.mac {
+        println!(
+            "    <address addr=\"{}\" addrtype=\"mac\"/>",
+            xml_escape(mac)
+        );
+    }
+    println!("    <hostnames>");
+    println!(
+        "      <hostname name=\"{}\" type=\"user\"/>",
+        xml_escape(&report.target)
+    );
+    println!("    </hostnames>");
+    println!("    <ports>");
+    if report.closed_count > 0 {
+        println!(
+            "      <extraports state=\"closed\" count=\"{}\">",
+            report.closed_count
+        );
+        println!(
+            "        <extrareasons reason=\"conn-refused\" count=\"{}\"/>",
+            report.closed_count
+        );
+        println!("      </extraports>");
+    }
+    if report.filtered_count > 0 {
+        println!(
+            "      <extraports state=\"filtered\" count=\"{}\">",
+            report.filtered_count
+        );
+        println!(
+            "        <extrareasons reason=\"no-response\" count=\"{}\"/>",
+            report.filtered_count
+        );
+        println!("      </extraports>");
+    }
+
+    for r in &report.ports {
+        if opts.only_open && r.state != State::Open {
+            continue;
+        }
+        let interesting = match r.state {
+            State::Open | State::OpenFiltered => true,
+            State::Filtered | State::Closed => opts.verbosity >= 2 || opts.reason,
+        };
+        if !interesting {
+            continue;
+        }
+
+        println!(
+            "      <port protocol=\"{}\" portid=\"{}\">",
+            r.proto, r.port
+        );
+        println!(
+            "        <state state=\"{}\" reason=\"{}\" reason_ttl=\"0\"/>",
+            r.state.label(),
+            xml_escape(r.reason)
+        );
+        if let Some(svc) = &r.service {
+            let name = if svc.name.is_empty() {
+                service_name(r.port)
+            } else {
+                &svc.name
+            };
+            let mut svc_attrs = format!("name=\"{}\"", xml_escape(name));
+            if !svc.product.is_empty() {
+                svc_attrs.push_str(&format!(" product=\"{}\"", xml_escape(&svc.product)));
+            }
+            if !svc.version.is_empty() {
+                svc_attrs.push_str(&format!(" version=\"{}\"", xml_escape(&svc.version)));
+            }
+            if !svc.extra.is_empty() {
+                svc_attrs.push_str(&format!(" extrainfo=\"{}\"", xml_escape(&svc.extra)));
+            }
+            if !svc.os_hint.is_empty() {
+                svc_attrs.push_str(&format!(" ostype=\"{}\"", xml_escape(&svc.os_hint)));
+            }
+            svc_attrs.push_str(" method=\"probed\" conf=\"10\"");
+
+            println!("        <service {}>", svc_attrs);
+            for f in r.findings.iter().filter(|f| finding_shown(f, opts)) {
+                println!(
+                    "          <script id=\"{}\" output=\"[{}] {}\"/>",
+                    xml_escape(&f.id),
+                    f.severity.label(),
+                    xml_escape(&f.title)
+                );
+            }
+            println!("        </service>");
+        }
+        println!("      </port>");
+    }
+    println!("    </ports>");
+
+    if opts.os_detection && !report.os_guess.is_empty() && report.os_guess != "unknown" {
+        println!("    <os>");
+        println!(
+            "      <osmatch name=\"{}\" accuracy=\"90\" line=\"1000\"/>",
+            xml_escape(&report.os_guess)
+        );
+        println!("    </os>");
+    }
+
+    let srtt_us = (report.avg_rtt_ms * 1000.0) as u64;
+    println!(
+        "    <times srtt=\"{}\" rttvar=\"5000\" to=\"{}\"/>",
+        srtt_us,
+        (report.elapsed.as_micros()).min(u64::MAX as u128)
+    );
+    println!("  </host>");
 }
 
 /// Print a short notice when SYN scan was requested but we lack privileges.
@@ -2731,5 +2993,40 @@ mod tests {
             ..guess.clone()
         };
         assert!(replied.has_evidence());
+    }
+
+    #[tokio::test]
+    async fn test_ipv6_cidr_expansion() {
+        let addrs = expand("2001:db8::/126", IpVersion::V6, false)
+            .await
+            .unwrap();
+        assert_eq!(addrs.len(), 4);
+        assert_eq!(addrs[0].0, "2001:db8::");
+        assert_eq!(addrs[3].0, "2001:db8::3");
+
+        // Single host prefix
+        let single = expand("2001:db8::1/128", IpVersion::Any, false)
+            .await
+            .unwrap();
+        assert_eq!(single.len(), 1);
+        assert_eq!(single[0].0, "2001:db8::1");
+
+        // Capped /64
+        let capped = expand("2001:db8::/64", IpVersion::Any, false)
+            .await
+            .unwrap();
+        assert_eq!(capped.len(), 65536);
+
+        // Filtered out by -4
+        let filtered = expand("2001:db8::/126", IpVersion::V4, false).await;
+        assert!(filtered.is_err());
+    }
+
+    #[test]
+    fn test_xml_escape_and_output() {
+        assert_eq!(
+            crate::util::output::xml_escape("<>&\"'"),
+            "&lt;&gt;&amp;&quot;&apos;"
+        );
     }
 }
