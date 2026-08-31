@@ -4,6 +4,9 @@
 //! over UDP with automatic TCP fallback on truncation. Supports the common
 //! record types and querying arbitrary servers, all unprivileged.
 
+pub mod whois;
+pub mod nsaudit;
+
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -1358,7 +1361,7 @@ pub async fn query_dot(
         .map_err(|_| "DoT connect timed out".to_string())?
         .map_err(|e| format!("DoT connect failed: {e}"))?;
 
-    let mut tls = crate::tls13::handshake(stream, tls_name, &["dot"], o.timeout_ms.max(3000)).await?;
+    let mut tls = crate::tls::tls13::handshake(stream, tls_name, &["dot"], o.timeout_ms.max(3000)).await?;
 
     let mut framed = Vec::with_capacity(packet.len() + 2);
     framed.extend_from_slice(&(packet.len() as u16).to_be_bytes());
@@ -1419,7 +1422,7 @@ pub async fn query_doh(
         .map_err(|e| format!("DoH connect failed: {e}"))?;
 
     let mut tls =
-        crate::tls13::handshake(stream, &host, &["http/1.1"], o.timeout_ms.max(3000)).await?;
+        crate::tls::tls13::handshake(stream, &host, &["http/1.1"], o.timeout_ms.max(3000)).await?;
 
     let mut req = Vec::new();
     req.extend_from_slice(

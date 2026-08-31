@@ -13,7 +13,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
-use crate::output::Painter;
+use crate::util::output::Painter;
 
 const IANA: &str = "whois.iana.org";
 

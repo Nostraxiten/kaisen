@@ -3,31 +3,22 @@
 //! Entry point: parse args, then dispatch to the scanner or the DNS resolver.
 
 mod cli;
-mod cve;
 mod dns;
-mod mail;
-mod neigh;
-mod netutil;
-mod nsaudit;
-mod osfp;
-mod output;
 mod ports;
-mod probe;
 mod scan;
 mod service;
 mod tls;
-mod tls13;
-mod udp;
-mod web;
+mod util;
 mod vuln;
-mod whois;
 
 use std::net::IpAddr;
 use std::process::ExitCode;
 use std::time::Instant;
 
 use cli::{Mode, Options, OutputFormat};
-use output::Painter;
+use util::output::Painter;
+use dns::{nsaudit, whois};
+use scan::{neigh, mail};
 
 fn banner(p: &Painter) {
     let art = r#"

@@ -21,7 +21,7 @@ use std::time::Duration;
 use tokio::net::UdpSocket;
 use tokio::time::timeout;
 
-use crate::probe::Probed;
+use crate::service::probe::Probed;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UdpState {
@@ -762,7 +762,7 @@ fn parse_ntp(data: &[u8]) -> Probed {
             if let Some(v) = kv_lookup(&text, key) {
                 if key == "version" {
                     p.product = v.split(&['@', ' '][..]).next().unwrap_or("ntpd").to_string();
-                    p.version = crate::probe::first_version(&v);
+                    p.version = crate::service::probe::first_version(&v);
                     if p.version.is_empty() {
                         p.version = v.clone();
                     }
@@ -853,7 +853,7 @@ fn parse_snmp(data: &[u8]) -> Probed {
                     p.product = "SNMP agent".into();
                     p.extra = descr.clone();
                     p.banner = descr.clone();
-                    p.version = crate::probe::first_version(&descr);
+                    p.version = crate::service::probe::first_version(&descr);
                     p.os_hint = descr;
                     return p;
                 }
@@ -987,7 +987,7 @@ fn parse_dns(data: &[u8]) -> Probed {
     ] {
         if text.contains(needle) {
             p.product = product.to_string();
-            p.version = crate::probe::first_version(&text);
+            p.version = crate::service::probe::first_version(&text);
             break;
         }
     }
@@ -1000,7 +1000,7 @@ fn parse_dns(data: &[u8]) -> Probed {
         });
     }
     if p.version.is_empty() && ancount > 0 {
-        let v = crate::probe::first_version(&text);
+        let v = crate::service::probe::first_version(&text);
         if !v.is_empty() {
             p.version = v;
         }
@@ -1441,7 +1441,7 @@ fn parse_sip(data: &[u8]) -> Probed {
         if lower.starts_with("server:") || lower.starts_with("user-agent:") {
             let v = line.split_once(':').map(|(_, v)| v.trim()).unwrap_or("");
             p.product = v.split('/').next().unwrap_or(v).trim().to_string();
-            p.version = crate::probe::first_version(v);
+            p.version = crate::service::probe::first_version(v);
             p.banner = v.to_string();
         } else if lower.starts_with("allow:") {
             p.extra = clean(line.split_once(':').map(|(_, v)| v).unwrap_or(""), 80);

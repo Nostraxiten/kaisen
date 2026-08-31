@@ -205,8 +205,8 @@ async fn fetch(ip: IpAddr, port: u16, tls: bool, host: &str, path: &str, dur: Du
 
     let raw: Vec<u8> = if tls {
         let stream = timeout(dur, TcpStream::connect(addr)).await.ok()?.ok()?;
-        crate::netutil::reset_on_close(&stream);
-        let mut conn = crate::tls13::handshake(stream, host, &["http/1.1"], ms).await.ok()?;
+        crate::util::netutil::reset_on_close(&stream);
+        let mut conn = crate::tls::tls13::handshake(stream, host, &["http/1.1"], ms).await.ok()?;
         conn.write(req.as_bytes(), ms).await.ok()?;
         let mut buf = Vec::new();
         for _ in 0..16 {
@@ -221,7 +221,7 @@ async fn fetch(ip: IpAddr, port: u16, tls: bool, host: &str, path: &str, dur: Du
         buf
     } else {
         let mut stream = timeout(dur, TcpStream::connect(addr)).await.ok()?.ok()?;
-        crate::netutil::reset_on_close(&stream);
+        crate::util::netutil::reset_on_close(&stream);
         timeout(dur, stream.write_all(req.as_bytes())).await.ok()?.ok()?;
         read_all(&mut stream, dur).await
     };

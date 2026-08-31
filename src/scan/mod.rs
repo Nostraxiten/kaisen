@@ -2,6 +2,11 @@
 //! async TCP connect scanner, optional service/version/OS/vuln enrichment, and
 //! result rendering in normal / JSON / grepable formats.
 
+pub mod neigh;
+pub mod osfp;
+pub mod udp;
+pub mod mail;
+
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
 
@@ -10,7 +15,7 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 
 use crate::cli::{IpVersion, Options, OutputFormat, ScanKind};
-use crate::output::{json_escape, Painter};
+use crate::util::output::{json_escape, Painter};
 use crate::ports::service_name;
 use crate::service::{self, ServiceInfo};
 use crate::vuln::{self, Finding, Severity};
@@ -52,7 +57,7 @@ pub struct PortReport {
     pub eager_service: Option<ServiceInfo>,
     /// -WW: whatweb-style web fingerprint, present only for open HTTP/HTTPS
     /// ports when `--webscan` ran and something was learned.
-    pub web: Option<crate::web::WebProfile>,
+    pub web: Option<crate::service::web::WebProfile>,
 }
 
 /// Outcome of the `-FW` firewall pre-check: the random high ports we sampled
@@ -76,7 +81,7 @@ pub struct HostReport {
     pub open_count: usize,
     pub closed_count: usize,
     pub filtered_count: usize,
-    pub probes: Option<crate::osfp::Probes>,
+    pub probes: Option<crate::scan::osfp::Probes>,
     /// Host discovery result. Always true under -Pn. Otherwise true when the
     /// host answered ICMP echo, or any port answered (open or closed — a
     /// TCP RST is proof of life even if ICMP is filtered).
@@ -452,7 +457,7 @@ async fn probe_and_sniff(
                 // knocks the link offline for minutes on a big sweep. The RST
                 // frees the slot the instant we drop the socket. See
                 // `netutil::reset_on_close`.
-                crate::netutil::reset_on_close(&stream);
+                crate::util::netutil::reset_on_close(&stream);
                 // Connection established. Run full service detection on this
                 // socket right now — before the middlebox can block reconnects.
                 let info = if want_service {
@@ -740,7 +745,7 @@ const DISCOVERY_TCP_TIMEOUT_MS: u64 = 1000;
 /// N × timeout — and then the OS ARP/neighbor cache is checked as a
 /// last-resort layer-2 fallback.
 async fn quick_alive(ip: IpAddr) -> bool {
-    let ping = crate::osfp::ping_quick(ip);
+    let ping = crate::scan::osfp::ping_quick(ip);
     // Probe all discovery ports in parallel: first non-Filtered answer wins.
     let tcp = async {
         let states: Vec<State> = stream::iter(DISCOVERY_PORTS)
@@ -756,7 +761,7 @@ async fn quick_alive(ip: IpAddr) -> bool {
     if ping_ok || tcp_ok {
         return true;
     }
-    crate::osfp::arp_alive(ip).await
+    crate::scan::osfp::arp_alive(ip).await
 }
 
 /// Fast parallel liveness sweep across *every* target before the expensive
@@ -1031,7 +1036,7 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
     // -MC: MAC address from the OS's own ARP/neighbor cache (cheap local
     // lookup, no network round-trip beyond what the probes above already did).
     let mac = if opts.mac_info {
-        crate::osfp::arp_lookup(ip).await
+        crate::scan::osfp::arp_lookup(ip).await
     } else {
         None
     };
@@ -1133,13 +1138,13 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
             let counter = prog.counter();
             let host = target.to_string();
             let web_conc = concurrency.min(4).max(1);
-            let profiles: Vec<(u16, Option<crate::web::WebProfile>)> =
+            let profiles: Vec<(u16, Option<crate::service::web::WebProfile>)> =
                 stream::iter(web_targets.into_iter())
                     .map(|(port, tls)| {
                         let host = host.clone();
                         let counter = counter.clone();
                         async move {
-                            let p = crate::web::scan(&host, ip, port, tls, timeout_ms.max(3000)).await;
+                            let p = crate::service::web::scan(&host, ip, port, tls, timeout_ms.max(3000)).await;
                             counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             (port, p)
                         }
@@ -1165,11 +1170,11 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
         let udp_timeout = timeout_ms.max(1000);
         let prog = Progress::start(&format!("{ip} UDP"), opts.udp_ports.len(), opts);
         let counter = prog.counter();
-        let udp_results: Vec<crate::udp::UdpReport> = stream::iter(opts.udp_ports.clone())
+        let udp_results: Vec<crate::scan::udp::UdpReport> = stream::iter(opts.udp_ports.clone())
             .map(|port| {
                 let counter = counter.clone();
                 async move {
-                    let r = crate::udp::probe(ip, port, udp_timeout, retries).await;
+                    let r = crate::scan::udp::probe(ip, port, udp_timeout, retries).await;
                     counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     r
                 }
@@ -1181,14 +1186,14 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
 
         for u in udp_results {
             let state = match u.state {
-                crate::udp::UdpState::Open => State::Open,
-                crate::udp::UdpState::Closed => State::Closed,
-                crate::udp::UdpState::OpenFiltered => State::OpenFiltered,
+                crate::scan::udp::UdpState::Open => State::Open,
+                crate::scan::udp::UdpState::Closed => State::Closed,
+                crate::scan::udp::UdpState::OpenFiltered => State::OpenFiltered,
             };
             let svc = u
                 .service
                 .as_ref()
-                .map(|p| service::from_probed(p, crate::udp::udp_service_name(u.port)));
+                .map(|p| service::from_probed(p, crate::scan::udp::udp_service_name(u.port)));
             let findings = if opts.vuln {
                 vuln::assess_udp(u.port, svc.as_ref())
             } else {
@@ -1220,7 +1225,7 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
     // for OS detection and as a signal for device-type guessing, best-effort
     // and unprivileged.
     let probes = if opts.os_detection || opts.device_detection {
-        Some(crate::osfp::probe(ip).await)
+        Some(crate::scan::osfp::probe(ip).await)
     } else {
         None
     };
@@ -1953,7 +1958,7 @@ fn print_normal(report: &HostReport, opts: &Options) {
             };
             let svc_name = r.service.as_ref().map(|s| s.name.clone()).unwrap_or_else(|| {
                 if r.proto == "udp" {
-                    crate::udp::udp_service_name(r.port).to_string()
+                    crate::scan::udp::udp_service_name(r.port).to_string()
                 } else {
                     service_name(r.port).to_string()
                 }
@@ -2094,7 +2099,7 @@ fn print_normal(report: &HostReport, opts: &Options) {
 }
 
 /// Render one port's `-WW` web fingerprint, indented under its port row.
-fn print_web_profile(w: &crate::web::WebProfile, p: &Painter, opts: &Options) {
+fn print_web_profile(w: &crate::service::web::WebProfile, p: &Painter, opts: &Options) {
     if !w.title.is_empty() {
         println!("      {} {}", p.dim("web  ·"), p.bold(&w.title));
     }
@@ -2190,7 +2195,7 @@ fn print_grepable(report: &HostReport) {
 }
 
 /// One port's `-WW` web profile as a JSON value (or `null`).
-fn web_json(w: Option<&crate::web::WebProfile>) -> String {
+fn web_json(w: Option<&crate::service::web::WebProfile>) -> String {
     let Some(w) = w else {
         return "null".to_string();
     };

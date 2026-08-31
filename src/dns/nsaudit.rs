@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use std::net::{IpAddr, SocketAddr};
 
 use crate::dns::{self, QueryOpts, RData};
-use crate::output::Painter;
+use crate::util::output::Painter;
 
 #[derive(Clone, Copy)]
 enum Mark {

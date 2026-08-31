@@ -12,6 +12,8 @@
 //! names the CA, and the negotiated protocol tells you whether the box still
 //! speaks obsolete crypto.
 
+pub mod tls13;
+
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -140,13 +142,13 @@ pub async fn probe_stream(
 /// offering TLS 1.3. Modern 1.3-only servers answer the second attempt.
 pub async fn probe(addr: std::net::SocketAddr, host: Option<&str>, dur: Duration) -> Option<TlsInfo> {
     if let Ok(Ok(mut s)) = timeout(dur, TcpStream::connect(addr)).await {
-        crate::netutil::reset_on_close(&s);
+        crate::util::netutil::reset_on_close(&s);
         if let Some(i) = probe_stream(&mut s, host, dur, false).await {
             return Some(i);
         }
     }
     if let Ok(Ok(mut s)) = timeout(dur, TcpStream::connect(addr)).await {
-        crate::netutil::reset_on_close(&s);
+        crate::util::netutil::reset_on_close(&s);
         if let Some(i) = probe_stream(&mut s, host, dur, true).await {
             return Some(i);
         }

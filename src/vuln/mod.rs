@@ -2,10 +2,12 @@
 //!
 //! This is deliberately *heuristic*: it matches detected service/product/version
 //! banners against a curated, embedded signature table of well-known issues.
-//! It is not a full vulnerability scanner and does not perform exploitation —
+//! It is not a full vulnerability scanner and does not perform exploitation --
 //! it flags likely-vulnerable versions so you know where to look deeper.
 
-use crate::output::Painter;
+pub mod cve;
+
+use crate::util::output::Painter;
 use crate::service::ServiceInfo;
 
 #[derive(Debug, Clone)]
@@ -2533,7 +2535,7 @@ pub fn assess(port: u16, svc: &ServiceInfo) -> Vec<Finding> {
     // CVE correlation: detected product + version against the embedded CVE
     // range table. Independent of the exact-version SIGS above — it fires on
     // ranges and only when the version actually lands inside one.
-    out.extend(crate::cve::correlate(svc));
+    out.extend(crate::vuln::cve::correlate(svc));
 
     // Certificate hygiene, which the TLS prober establishes independently of
     // any product signature.
@@ -2690,7 +2692,7 @@ pub async fn assess_active(
 
     // Meilisearch with no master key: every route is public.
     if port == 7700 || hay.contains("meilisearch") {
-        if let Some((code, body)) = crate::probe::http_get(addr, "", "/indexes", dur).await {
+        if let Some((code, body)) = crate::service::probe::http_get(addr, "", "/indexes", dur).await {
             let looks_like_data = body.contains("\"results\"")
                 || body.contains("\"uid\"")
                 || body.trim_start().starts_with('[');
@@ -2710,7 +2712,7 @@ pub async fn assess_active(
     // the two by shared id.
     if matches!(port, 6443 | 8443 | 10250) && !svc.tls_version.is_empty() {
         let sni = addr.ip().to_string();
-        if let Some((_, body)) = crate::probe::https_get(addr, &sni, "/version", dur).await {
+        if let Some((_, body)) = crate::service::probe::https_get(addr, &sni, "/version", dur).await {
             let is_kube = body.contains("\"gitVersion\"")
                 || (body.contains("\"major\"") && body.contains("\"minor\""));
             if is_kube {
@@ -2729,13 +2731,13 @@ pub async fn assess_active(
 
     // Ezviz command port accepting cleartext, on a host already fingerprinted
     // as Ezviz elsewhere.
-    if port == 9010 && host_ezviz && crate::probe::ezviz_cleartext(addr, dur).await {
+    if port == 9010 && host_ezviz && crate::service::probe::ezviz_cleartext(addr, dur).await {
         out.push(finding_from(active("KAISEN-EZVIZ-9010-CLEARTEXT")));
     }
 
     // Redis answering without a password.
     if (port == 6379 || port == 6380 || hay.contains("redis"))
-        && crate::probe::redis_unauth(addr, dur).await
+        && crate::service::probe::redis_unauth(addr, dur).await
     {
         out.push(finding_from(active("KAISEN-REDIS-NOAUTH")));
     }
@@ -2748,9 +2750,9 @@ pub async fn assess_active(
         let tls = !svc.tls_version.is_empty();
         async move {
             if tls {
-                crate::probe::https_get(addr, &sni, path, dur).await
+                crate::service::probe::https_get(addr, &sni, path, dur).await
             } else {
-                crate::probe::http_get(addr, "", path, dur).await
+                crate::service::probe::http_get(addr, "", path, dur).await
             }
         }
     };
@@ -2889,7 +2891,7 @@ pub fn print_catalogue(min: Option<Severity>, color: bool) {
 
     println!();
     println!("{}", p.bold("CVE CORRELATION  (product + affected version range)"));
-    for e in crate::cve::CVE_DB {
+    for e in crate::vuln::cve::CVE_DB {
         if !keep(e.severity) {
             continue;
         }
@@ -2948,7 +2950,7 @@ pub fn print_catalogue(min: Option<Severity>, color: bool) {
     }
 
     let total = SIGS.len()
-        + crate::cve::CVE_DB.len()
+        + crate::vuln::cve::CVE_DB.len()
         + TCP_EXPOSURES.len()
         + UDP_EXPOSURES.len()
         + UDP_CONDITIONS.len()
@@ -2959,12 +2961,12 @@ pub fn print_catalogue(min: Option<Severity>, color: bool) {
     let udp_ports: std::collections::BTreeSet<u16> =
         UDP_EXPOSURES.iter().flat_map(|e| e.ports.iter().copied()).collect();
     let cves = SIGS.iter().filter(|s| s.id.starts_with("CVE-")).count()
-        + crate::cve::CVE_DB.len();
+        + crate::vuln::cve::CVE_DB.len();
 
     println!();
     println!("{}", p.bold("TOTALS"));
     println!("  {:<34} {}", "version signatures", SIGS.len());
-    println!("  {:<34} {}", "CVE range correlations", crate::cve::CVE_DB.len());
+    println!("  {:<34} {}", "CVE range correlations", crate::vuln::cve::CVE_DB.len());
     println!("  {:<34} {}", "  total carrying a CVE id", cves);
     println!(
         "  {:<34} {} ({} ports)",
@@ -3126,7 +3128,7 @@ mod tests {
         let mut sources = emittable_products();
         sources.extend(CVE_BANNER_TOKENS.iter().map(|t| t.to_string()));
         let unreachable =
-            unreachable_in(crate::cve::CVE_DB.iter().map(|e| e.match_product), &sources);
+            unreachable_in(crate::vuln::cve::CVE_DB.iter().map(|e| e.match_product), &sources);
 
         assert!(
             unreachable.is_empty(),

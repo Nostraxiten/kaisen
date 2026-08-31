@@ -118,7 +118,7 @@ pub async fn http_get(
     dur: Duration,
 ) -> Option<(u16, String)> {
     let mut s = timeout(dur, TcpStream::connect(addr)).await.ok()?.ok()?;
-    crate::netutil::reset_on_close(&s);
+    crate::util::netutil::reset_on_close(&s);
     send(&mut s, http_get_request(host, path).as_bytes(), dur).await?;
     parse_http(&read_any(&mut s, dur, 65536).await)
 }
@@ -133,8 +133,8 @@ pub async fn https_get(
 ) -> Option<(u16, String)> {
     let ms = (dur.as_millis() as u64).max(3000);
     let stream = timeout(dur, TcpStream::connect(addr)).await.ok()?.ok()?;
-    crate::netutil::reset_on_close(&stream);
-    let mut tls = crate::tls13::handshake(stream, sni, &["http/1.1"], ms).await.ok()?;
+    crate::util::netutil::reset_on_close(&stream);
+    let mut tls = crate::tls::tls13::handshake(stream, sni, &["http/1.1"], ms).await.ok()?;
     tls.write(http_get_request(sni, path).as_bytes(), ms).await.ok()?;
     let mut raw = Vec::new();
     for _ in 0..8 {
@@ -156,7 +156,7 @@ pub async fn redis_unauth(addr: SocketAddr, dur: Duration) -> bool {
     let Ok(Ok(mut s)) = timeout(dur, TcpStream::connect(addr)).await else {
         return false;
     };
-    crate::netutil::reset_on_close(&s);
+    crate::util::netutil::reset_on_close(&s);
     if send(&mut s, b"*1\r\n$4\r\nPING\r\n", dur).await.is_none() {
         return false;
     }
@@ -172,7 +172,7 @@ pub async fn ezviz_cleartext(addr: SocketAddr, dur: Duration) -> bool {
     let Ok(Ok(mut s)) = timeout(dur, TcpStream::connect(addr)).await else {
         return false;
     };
-    crate::netutil::reset_on_close(&s);
+    crate::util::netutil::reset_on_close(&s);
     // A short, benign framing byte plus padding — enough to see whether the
     // device answers in the clear at all.
     if send(&mut s, &[0x00, 0x00, 0x00, 0x00], dur).await.is_none() {

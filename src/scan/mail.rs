@@ -7,7 +7,7 @@
 use std::net::SocketAddr;
 
 use crate::dns::{self, RData};
-use crate::output::Painter;
+use crate::util::output::Painter;
 
 /// DKIM selectors we can't enumerate from DNS, so we probe the common ones used
 /// by popular mail providers.

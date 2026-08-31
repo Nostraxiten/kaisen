@@ -546,7 +546,7 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                 i += 1;
                 let v = args.get(i).ok_or("--top-udp requires a number")?;
                 let n: usize = v.parse().map_err(|_| "invalid --top-udp value")?;
-                o.udp_ports = crate::udp::top_udp_ports(n);
+                o.udp_ports = crate::scan::udp::top_udp_ports(n);
                 o.udp_ports_explicit = true;
                 o.udp_scan = true;
             }
@@ -776,7 +776,7 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
     }
 
     if o.udp_scan && !o.udp_ports_explicit {
-        o.udp_ports = crate::udp::top_udp_ports(40);
+        o.udp_ports = crate::scan::udp::top_udp_ports(40);
     }
 
     // Resolve port selection precedence: explicit -p > all > top.

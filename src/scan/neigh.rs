@@ -11,7 +11,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use futures::stream::{self, StreamExt};
 
 use crate::dns::{self, RData};
-use crate::output::Painter;
+use crate::util::output::Painter;
 
 /// Common subdomain labels to probe.
 const SUBDOMAINS: &[&str] = &[

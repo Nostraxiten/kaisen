@@ -2,13 +2,16 @@
 //! All unprivileged: it just talks to the open TCP port like any client would.
 //!
 //! Detection runs in three tiers, cheapest first:
-//!   1. **Listen** — protocols that greet you (SSH, SMTP, FTP, IMAP, VNC…).
+//!   1. **Listen** — protocols that greet you (SSH, SMTP, FTP, IMAP, VNC...).
 //!   2. **Probe** — a per-port plan that says the right thing to make a silent
 //!      service identify itself: an HTTP request, a TLS ClientHello, or one of
-//!      the binary handshakes in `probe.rs` (SMB, TDS, TNS, CQL, BSON…).
+//!      the binary handshakes in `probe.rs` (SMB, TDS, TNS, CQL, BSON...).
 //!   3. **Fallback** — for ports with no plan and no greeting, try HTTP, then
 //!      TLS, then a bare newline, because unusual ports are exactly where
 //!      unexpected web and TLS services live.
+
+pub mod probe;
+pub mod web;
 
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -16,7 +19,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
-use crate::probe::{self, first_version};
+use probe::first_version;
 use crate::tls;
 
 #[derive(Debug, Clone, Default)]
@@ -222,7 +225,7 @@ pub async fn detect(addr: SocketAddr, default_name: &str, timeout_ms: u64, host:
         _ => return info,
     };
     // RST on close so this probe doesn't leave a lingering conntrack entry.
-    crate::netutil::reset_on_close(&stream);
+    crate::util::netutil::reset_on_close(&stream);
 
     let mut data = read_for(&mut stream, Duration::from_millis(listen_ms), 8192).await;
 
@@ -259,7 +262,7 @@ pub async fn detect(addr: SocketAddr, default_name: &str, timeout_ms: u64, host:
         // An HTTP service on an unexpected port is by far the most common case.
         if !matches!(plan_for(port), Plan::Http(_)) {
             if let Ok(Ok(mut s)) = timeout(dur, TcpStream::connect(addr)).await {
-                crate::netutil::reset_on_close(&s);
+                crate::util::netutil::reset_on_close(&s);
                 let req = http_request("/", host, port);
                 if timeout(dur, s.write_all(req.as_bytes())).await.is_ok() {
                     let body = read_for(&mut s, dur, 65536).await;
@@ -378,7 +381,7 @@ pub async fn detect_with_stream(
     if info.product.is_empty() {
         if !matches!(plan_for(port), Plan::Http(_)) {
             if let Ok(Ok(mut s)) = timeout(dur, TcpStream::connect(addr)).await {
-                crate::netutil::reset_on_close(&s);
+                crate::util::netutil::reset_on_close(&s);
                 let req = http_request("/", host, port);
                 if timeout(dur, s.write_all(req.as_bytes())).await.is_ok() {
                     let body = read_for(&mut s, dur, 65536).await;
@@ -404,7 +407,7 @@ async fn run_binary(kind: Bin, addr: SocketAddr, host: &str, dur: Duration) -> O
         Ok(Ok(s)) => s,
         _ => return None,
     };
-    crate::netutil::reset_on_close(&s);
+    crate::util::netutil::reset_on_close(&s);
     let host_opt = if host.is_empty() { None } else { Some(host) };
     match kind {
         Bin::Smb => probe::smb(&mut s, addr.port(), dur).await,
