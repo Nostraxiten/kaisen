@@ -115,6 +115,7 @@ pub struct Options {
     // scan
     pub scan_kind: ScanKind,
     pub ports: Vec<u16>,
+    pub port_specs: Vec<ports::PortSpec>,
     pub ports_explicit: bool,
     pub ports_selected: bool,
     pub service_detection: bool,
@@ -203,6 +204,7 @@ impl Default for Options {
             targets: Vec::new(),
             scan_kind: ScanKind::Connect,
             ports: Vec::new(),
+            port_specs: Vec::new(),
             ports_explicit: false,
             ports_selected: false,
             service_detection: false,
@@ -492,7 +494,9 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             "-p" | "--ports" => {
                 i += 1;
                 let v = args.get(i).ok_or("-p requires a port spec")?;
-                o.ports = ports::parse_ports(v)?;
+                let specs = ports::parse_port_specs(v)?;
+                o.ports = specs.iter().map(|s| s.port).collect();
+                o.port_specs = specs;
                 o.ports_explicit = true;
                 o.ports_selected = true;
             }
@@ -784,6 +788,7 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
         } else {
             o.ports = ports::top_ports(1000); // sensible default like nmap
         }
+        o.port_specs = o.ports.iter().map(|&p| ports::PortSpec::new(p)).collect();
     }
 
     // --exclude-ports applies last, so it subtracts from whatever the selection
@@ -793,6 +798,7 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
     if !o.exclude_ports.is_empty() {
         let drop: std::collections::HashSet<u16> = o.exclude_ports.iter().copied().collect();
         o.ports.retain(|p| !drop.contains(p));
+        o.port_specs.retain(|s| !drop.contains(&s.port));
         o.udp_ports.retain(|p| !drop.contains(p));
         if o.ports.is_empty() && o.udp_ports.is_empty() {
             return Err("--exclude-ports removed every selected port".into());

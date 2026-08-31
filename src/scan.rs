@@ -98,6 +98,8 @@ pub struct HostReport {
     /// `-FW` firewall pre-check result, or `None` when `-FW` was not requested.
     /// When `blocked` is set the real scan was skipped on purpose.
     pub firewall: Option<FirewallProbe>,
+    /// Count of live streaming lines emitted to stderr during the scan of this host.
+    pub live_lines: usize,
 }
 
 /// Expand a target string into concrete IPs. Supports hostname, IPv4/IPv6, and
@@ -814,6 +816,7 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
             device_confidence: "none",
             device_signals: Vec::new(),
             firewall: None,
+            live_lines: 0,
         };
     }
 
@@ -848,6 +851,7 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
                 device_confidence: "none",
                 device_signals: Vec::new(),
                 firewall: Some(probe),
+                live_lines: 0,
             };
         }
         Some(probe)
@@ -870,12 +874,14 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
     // output on a terminal only — JSON/grepable must stay one complete document,
     // a redirect should stay clean, and -FW defers to its post-sweep verdict
     // (an open we streamed could still be downgraded), so each switches it off.
+    let live_counter = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let stream_live = opts.stream
         && opts.output == OutputFormat::Normal
         && !opts.firewall_check
         && std::io::IsTerminal::is_terminal(&std::io::stderr());
     let stream_color = opts.color;
     if stream_live {
+        live_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         eprintln!(
             "{}",
             Painter::new(stream_color).dim(&format!(
@@ -938,6 +944,7 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
             let pacer = pacer.clone();
             let stream_live = stream_live;
             let stream_color = stream_color;
+            let live_counter = live_counter.clone();
             async move {
                 // Acquire a rate-limit token before opening the connection.
                 // This spaces out new SYNs so the router's conntrack table
@@ -955,6 +962,7 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
                 // Stream this port the moment it resolves open — before the
                 // sweep moves on to the next one.
                 if stream_live && state == State::Open {
+                    live_counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     emit_live_open(port, &eager, stream_color);
                 }
                 counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1234,6 +1242,7 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
         device_confidence: "none",
         device_signals: Vec::new(),
         firewall: fw_precheck,
+        live_lines: live_counter.load(std::sync::atomic::Ordering::Relaxed),
     };
 
     // Phase 4: combine every signal into a single OS guess string.
@@ -1300,7 +1309,27 @@ fn emit_live_open(port: u16, svc: &Option<ServiceInfo>, color: bool) {
     let _ = std::io::Write::flush(&mut std::io::stderr());
 }
 
+/// Clear the N live streaming lines emitted to stderr during host scanning.
+pub fn clear_live_lines(count: usize) {
+    if count == 0 {
+        return;
+    }
+    let mut s = String::new();
+    for _ in 0..count {
+        s.push_str("\x1b[1A\x1b[2K");
+    }
+    s.push('\r');
+    eprint!("{s}");
+    let _ = std::io::Write::flush(&mut std::io::stderr());
+}
+
 pub fn print_report(report: &HostReport, opts: &Options) {
+    if report.live_lines > 0
+        && opts.output == OutputFormat::Normal
+        && std::io::IsTerminal::is_terminal(&std::io::stderr())
+    {
+        clear_live_lines(report.live_lines);
+    }
     match opts.output {
         OutputFormat::Normal => print_normal(report, opts),
         OutputFormat::Grepable => print_grepable(report),
@@ -1685,6 +1714,12 @@ fn describe_role(ports: &[u16]) -> String {
 /// Focused output for `kaisen -OS <target>`: report the operating system and a
 /// bit of context about the host, instead of the port table.
 pub fn print_os_report(report: &HostReport, opts: &Options) {
+    if report.live_lines > 0
+        && opts.output == OutputFormat::Normal
+        && std::io::IsTerminal::is_terminal(&std::io::stderr())
+    {
+        clear_live_lines(report.live_lines);
+    }
     let p = Painter::new(opts.color);
     if !report.host_up {
         if opts.verbosity >= 1 {
@@ -1697,8 +1732,12 @@ pub fn print_os_report(report: &HostReport, opts: &Options) {
             );
             println!(
                 "{}",
-                p.yellow("Note: Host seems down. If it is really up, but blocking our probes, try -Pn.")
+                p.red(&format!(
+                    "[!] Host {} appears down or non-responsive. If host is up, try -Pn.",
+                    report.target
+                ))
             );
+            println!("{}", p.dim("--------------------------------------------------"));
         }
         return;
     }
@@ -1788,9 +1827,6 @@ pub fn print_os_report(report: &HostReport, opts: &Options) {
 fn print_normal(report: &HostReport, opts: &Options) {
     let p = Painter::new(opts.color);
     if !report.host_up {
-        // Match nmap's default terseness: a dead/silent address gets no
-        // report block at all, just a line in the final tally — only show
-        // the per-host note when the user explicitly asked for detail.
         if opts.verbosity >= 1 {
             println!();
             println!(
@@ -1801,8 +1837,12 @@ fn print_normal(report: &HostReport, opts: &Options) {
             );
             println!(
                 "{}",
-                p.yellow("Note: Host seems down. If it is really up, but blocking our probes, try -Pn.")
+                p.red(&format!(
+                    "[!] Host {} appears down or non-responsive. If host is up, try -Pn.",
+                    report.target
+                ))
             );
+            println!("{}", p.dim("--------------------------------------------------"));
         }
         return;
     }
@@ -1889,8 +1929,9 @@ fn print_normal(report: &HostReport, opts: &Options) {
     if open_only.is_empty() {
         println!(
             "{}",
-            p.yellow(&format!("No open ports found ({} scanned).", report.ports.len()))
+            p.red(&format!("[!] No open ports found on {} ({} scanned).", report.target, report.ports.len()))
         );
+        println!("{}", p.dim("--------------------------------------------------"));
     }
 
     if !shown.is_empty() {
