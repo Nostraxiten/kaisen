@@ -2663,6 +2663,22 @@ pub const ACTIVE_CHECKS: &[ActiveCheck] = &[
                  authentication, which routinely include database passwords and API keys. \
                  Restrict the actuator endpoints and require authentication on them.",
     },
+    ActiveCheck {
+        id: "CVE-2014-0160",
+        trigger: "TLS port: Heartbeat memory disclosure (Heartbleed)",
+        severity: Severity::Critical,
+        title: "OpenSSL TLS Heartbleed (CVE-2014-0160)",
+        detail: "The TLS service answered a malformed Heartbeat request with process memory. \
+                 Upgrade OpenSSL immediately and rotate exposed private keys.",
+    },
+    ActiveCheck {
+        id: "CVE-2022-22965",
+        trigger: "Spring app: classLoader binding parameters accepted",
+        severity: Severity::Critical,
+        title: "Spring Framework RCE (Spring4Shell, CVE-2022-22965)",
+        detail: "Spring Framework on Java 9+ allows unauthenticated RCE via DataBinder classLoader access. \
+                 Upgrade Spring Framework to 5.3.18+ / 5.2.20+.",
+    },
 ];
 
 fn active(id: &str) -> &'static ActiveCheck {
@@ -2698,6 +2714,13 @@ pub async fn assess_active(
     let port = addr.port();
     let hay = haystack(svc);
     let mut out = Vec::new();
+
+    // Heartbleed active probe on TLS endpoints
+    if !svc.tls_version.is_empty() {
+        if crate::tls::check_heartbleed(addr, dur).await {
+            out.push(finding_from(active("CVE-2014-0160")));
+        }
+    }
 
     // Meilisearch with no master key: every route is public.
     if port == 7700 || hay.contains("meilisearch") {
@@ -2801,6 +2824,15 @@ pub async fn assess_active(
                     out.push(finding_from(active("KAISEN-ACTUATOR-ENV")));
                     break;
                 }
+            }
+        }
+    }
+
+    // Spring4Shell active probe
+    if hay.contains("spring") || hay.contains("whitelabel") || hay.contains("tomcat") {
+        if let Some((code, body)) = get("/?class.module.classLoader.URLs%5B0%5D=0").await {
+            if code == 200 && (body.contains("org.springframework") || body.contains("whitelabel")) {
+                out.push(finding_from(active("CVE-2022-22965")));
             }
         }
     }

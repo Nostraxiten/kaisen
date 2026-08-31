@@ -101,6 +101,7 @@ async fn main() -> ExitCode {
         Mode::Whois => run_whois(&opts).await,
         Mode::Neighbor => run_neighbor(&opts).await,
         Mode::NsAudit => run_nsaudit(&opts).await,
+        Mode::Path => run_path(&opts).await,
         Mode::VulnList => {
             vuln::print_catalogue(opts.min_severity, opts.color);
             ExitCode::SUCCESS
@@ -108,6 +109,7 @@ async fn main() -> ExitCode {
         Mode::Scan => run_scan(&opts).await,
     }
 }
+
 
 async fn run_nsaudit(opts: &Options) -> ExitCode {
     let p = Painter::new(opts.color);
@@ -383,8 +385,29 @@ async fn run_scan(opts_in: &Options) -> ExitCode {
     }
 
     let json = opts.output == OutputFormat::Json;
+    let xml = opts.output == OutputFormat::Xml;
+    let sweep_start_time = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
     if json {
         println!("[");
+    } else if xml {
+        println!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+        println!("<!DOCTYPE nmaprun>");
+        println!("<?xml-stylesheet href=\"file:///usr/bin/../share/nmap/nmap.xsl\" type=\"text/xsl\"?>");
+        println!(
+            "<nmaprun scanner=\"kaisen\" args=\"kaisen\" start=\"{}\" version=\"{}\" xmloutputversion=\"1.05\">",
+            sweep_start_time,
+            cli::VERSION
+        );
+        println!(
+            "<scaninfo type=\"connect\" protocol=\"tcp\" numservices=\"{}\" services=\"1-65535\"/>",
+            opts.ports.len()
+        );
+        println!("<verbose level=\"{}\"/>", opts.verbosity);
+        println!("<debugging level=\"0\"/>");
     }
 
     let total = hosts.len();
@@ -397,30 +420,78 @@ async fn run_scan(opts_in: &Options) -> ExitCode {
     // escaneo de puertos completo solo se ejecuta contra los hosts que respondieron.
     let alive = scan::discover_alive(&hosts, opts).await;
 
-    for (idx, (target, ip)) in hosts.into_iter().enumerate() {
-        if idx > 0 && opts.timing.host_delay_ms > 0 {
-            tokio::time::sleep(std::time::Duration::from_millis(opts.timing.host_delay_ms)).await;
+    // Mejora 6 (Host parallelism): Escaneo concurrente entre hosts cuando hay varios
+    let host_conc = if opts.timing.host_delay_ms > 0 || total == 1 {
+        1
+    } else {
+        (opts.timing.concurrency / 10).clamp(1, 16).min(total)
+    };
+
+    let reports: Vec<(usize, scan::HostReport)> = if host_conc > 1 {
+        use futures::stream::{self, StreamExt};
+        let alive_ref = &alive;
+        stream::iter(hosts.into_iter().enumerate())
+            .map(|(idx, (target, ip))| async move {
+                let report = scan::scan_host(&target, ip, opts, alive_ref[idx]).await;
+                (idx, report)
+            })
+            .buffer_unordered(host_conc)
+            .collect()
+            .await
+    } else {
+        let mut list = Vec::with_capacity(total);
+        for (idx, (target, ip)) in hosts.into_iter().enumerate() {
+            if idx > 0 && opts.timing.host_delay_ms > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(opts.timing.host_delay_ms)).await;
+            }
+            let report = scan::scan_host(&target, ip, opts, alive[idx]).await;
+            list.push((idx, report));
         }
-        let report = scan::scan_host(&target, ip, opts, alive[idx]).await;
+        list
+    };
+
+    let mut sorted_reports = reports;
+    sorted_reports.sort_by_key(|(idx, _)| *idx);
+
+    for (idx, report) in &sorted_reports {
         if report.host_up {
             up_count += 1;
         }
         if report.open_count > 0 {
             any_open = true;
         }
-        if json && idx > 0 {
+        if json && *idx > 0 {
             println!(",");
         }
         if os_focus {
-            scan::print_os_report(&report, opts);
+            scan::print_os_report(report, opts);
         } else {
-            scan::print_report(&report, opts);
+            scan::print_report(report, opts);
         }
     }
 
     if json {
         println!("]");
+    } else if xml {
+        let sweep_end_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let elapsed_s = sweep_start.elapsed().as_secs_f64();
+        println!("<runstats>");
+        println!(
+            "  <finished time=\"{}\" elapsed=\"{:.2}\" exit=\"success\" summary=\"Kaisen done: {} IP address(es) ({} host(s) up) scanned in {:.2} seconds\"/>",
+            sweep_end_time,
+            elapsed_s,
+            total,
+            up_count,
+            elapsed_s
+        );
+        println!("  <hosts up=\"{}\" down=\"{}\" total=\"{}\"/>", up_count, total - up_count, total);
+        println!("</runstats>");
+        println!("</nmaprun>");
     }
+
 
     // Recuento al estilo nmap: con muchos objetivos y hosts mayormente silenciosos
     // omitidos del informe anterior, este es el único lugar donde su recuento aparece.
@@ -435,6 +506,54 @@ async fn run_scan(opts_in: &Options) -> ExitCode {
         );
     }
 
+    if let Some(prev_file) = &opts.diff_file {
+        match std::fs::read_to_string(prev_file) {
+            Ok(prev_content) => {
+                match scan::diff::parse_json_report(&prev_content) {
+                    Ok(prev_snap) => {
+                        let mut curr_snap = std::collections::BTreeMap::new();
+                        for (_, report) in &sorted_reports {
+                            let mut ports_map = std::collections::BTreeMap::new();
+                            for r in &report.ports {
+                                let svc = r.service.as_ref();
+                                ports_map.insert(
+                                    r.port,
+                                    scan::diff::PortInfo {
+                                        port: r.port,
+                                        proto: r.proto.to_string(),
+                                        state: r.state.label().to_string(),
+                                        service: svc.map(|s| s.name.clone()).unwrap_or_else(|| ports::service_name(r.port).to_string()),
+                                        product: svc.map(|s| s.product.clone()).unwrap_or_default(),
+                                        version: svc.map(|s| s.version.clone()).unwrap_or_default(),
+                                        findings: r.findings.iter().map(|f| f.id.clone()).collect(),
+                                    },
+                                );
+                            }
+                            curr_snap.insert(
+                                report.ip.to_string(),
+                                scan::diff::HostSnapshot {
+                                    target: report.target.clone(),
+                                    ip: report.ip.to_string(),
+                                    os_guess: report.os_guess.clone(),
+                                    ports: ports_map,
+                                },
+                            );
+                        }
+                        let diffs = scan::diff::diff_snapshots(&prev_snap, &curr_snap);
+                        scan::diff::print_diff_report(&diffs, opts.color);
+                    }
+                    Err(e) => {
+                        eprintln!("{}", p.red(&format!("kaisen diff: failed to parse {prev_file}: {e}")));
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("{}", p.red(&format!("kaisen diff: failed to read {prev_file}: {e}")));
+            }
+        }
+    }
+
+
     if any_open {
         ExitCode::SUCCESS
     } else {
@@ -442,6 +561,38 @@ async fn run_scan(opts_in: &Options) -> ExitCode {
         ExitCode::SUCCESS
     }
 }
+
+async fn run_path(opts: &Options) -> ExitCode {
+    let p = Painter::new(opts.color);
+    if opts.targets.is_empty() {
+        eprintln!("kaisen: no target specified for path trace");
+        eprintln!("Try 'kaisen path <target>'.");
+        return ExitCode::from(2);
+    }
+    let timeout_ms = opts.timing.connect_timeout_ms.max(1000);
+    for target in &opts.targets {
+        match scan::expand_target(target, opts.ip_version).await {
+            Ok(hosts) => {
+                for (name, ip) in hosts {
+                    scan::traceroute::run_traceroute(
+                        &name,
+                        ip,
+                        opts.path_port,
+                        opts.max_hops,
+                        timeout_ms,
+                        opts.color,
+                    )
+                    .await;
+                }
+            }
+            Err(e) => {
+                eprintln!("{}", p.red(&format!("kaisen: {target}: {e}")));
+            }
+        }
+    }
+    ExitCode::SUCCESS
+}
+
 
 async fn run_dns(opts: &Options) -> ExitCode {
     let p = Painter::new(opts.color);

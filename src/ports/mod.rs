@@ -2522,6 +2522,53 @@ pub const DEVICE_PROBE_PORTS: &[u16] = &[
     5000, 5001, 8006, 902, 5989, 9987,
 ];
 
+pub const PORTS_WEB: &[u16] = &[
+    80, 443, 8080, 8443, 8000, 8008, 8081, 8088, 8090, 8888, 9000, 9090, 9443, 10000, 4443, 7443,
+    2052, 2053, 2082, 2083, 2086, 2087, 2095, 2096, 3000, 5000, 7001, 7002, 8001, 8002, 8003, 8005,
+    8006, 8009, 8042, 8082, 8083, 8084, 8085, 8086, 8087, 8089, 8091, 8092, 8093, 8094, 8095, 8096,
+    8180, 8181, 8200, 8300, 8400, 8800, 8880, 9080, 9411, 9998, 9999, 10443, 15672, 30000,
+];
+
+pub const PORTS_DB: &[u16] = &[
+    3306, 3307, 33060, 5432, 5433, 1433, 1434, 1521, 1526, 27017, 27018, 28017, 6379, 5984, 9042,
+    7474, 9200, 9300, 11211, 8529, 28015, 29015, 26257, 26258, 7687, 8123, 9092, 9093, 9094, 2181,
+    3050, 4000, 50000, 6432, 5439, 19530, 6333, 6334, 8108, 7700, 2424, 2480, 7574,
+];
+
+pub const PORTS_IOT: &[u16] = &[
+    1883, 8883, 1884, 8884, 5683, 5684, 502, 44818, 47808, 102, 2404, 789, 20000, 8123, 8008, 8009,
+    1400, 554, 8554, 37777, 34567, 8899, 8060, 1900, 5353, 5357, 8291, 7547, 8843, 8384, 62078, 5555,
+];
+
+pub const PORTS_CLOUD: &[u16] = &[
+    6443, 10250, 10255, 10256, 2375, 2376, 2377, 2379, 2380, 7946, 4789, 5473, 9153, 30000, 31000,
+    8500, 8600, 4001, 8086, 9090, 9091, 9093, 9094, 3100, 3200, 4317, 4318, 14268, 16686, 9411,
+    8125, 8126, 5044, 5045, 9600, 24224, 8065, 8112, 10026, 11332, 11333, 11334,
+];
+
+pub const PORTS_MAIL: &[u16] = &[
+    25, 465, 587, 2525, 110, 995, 143, 993, 106, 109, 113, 209, 366, 783, 10024, 10025,
+];
+
+pub const PORTS_OT: &[u16] = &[
+    102, 502, 44818, 47808, 2404, 789, 20000, 1962, 19999, 20547, 4840, 4843, 4911, 9600, 18245,
+    18246, 20034, 27000, 34962, 34963, 34964, 34980, 50000,
+];
+
+/// Return a port list for named smart categories like "web", "db", "iot", "cloud", "mail", "ot".
+pub fn category_ports(name: &str) -> Option<&'static [u16]> {
+    match name.to_ascii_lowercase().as_str() {
+        "web" | "http" | "www" => Some(PORTS_WEB),
+        "db" | "database" | "sql" => Some(PORTS_DB),
+        "iot" | "smart" => Some(PORTS_IOT),
+        "cloud" | "k8s" | "kubernetes" | "docker" => Some(PORTS_CLOUD),
+        "mail" | "email" | "smtp" => Some(PORTS_MAIL),
+        "ot" | "ics" | "scada" | "industrial" => Some(PORTS_OT),
+        _ => None,
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2639,4 +2686,18 @@ mod tests {
         let ports = parse_ports("http,443,1-3").unwrap();
         assert_eq!(ports, vec![1, 2, 3, 80, 443]);
     }
+
+    #[test]
+    fn test_category_ports() {
+        assert!(category_ports("web").unwrap().contains(&80));
+        assert!(category_ports("web").unwrap().contains(&443));
+        assert!(category_ports("db").unwrap().contains(&3306));
+        assert!(category_ports("db").unwrap().contains(&5432));
+        assert!(category_ports("iot").unwrap().contains(&1883));
+        assert!(category_ports("cloud").unwrap().contains(&6443));
+        assert!(category_ports("mail").unwrap().contains(&25));
+        assert!(category_ports("ot").unwrap().contains(&502));
+        assert!(category_ports("nonexistent").is_none());
+    }
 }
+
