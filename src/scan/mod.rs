@@ -1,6 +1,7 @@
-//! Scan orchestration: target expansion (host / IP / CIDR), the unprivileged
-//! async TCP connect scanner, optional service/version/OS/vuln enrichment, and
-//! result rendering in normal / JSON / grepable formats.
+//! Orquestación del escaneo: expansión de objetivos (host / IP / CIDR), el
+//! escáner TCP asíncrono sin privilegios con connect(), enriquecimiento opcional
+//! de servicio/versión/SO/vuln, y renderizado de resultados en formato
+//! normal / JSON / grepable.
 
 pub mod neigh;
 pub mod osfp;

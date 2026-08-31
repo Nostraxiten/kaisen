@@ -1,9 +1,9 @@
-//! Lightweight vulnerability signature matching.
+//! Matching heurístico de firmas de vulnerabilidades.
 //!
-//! This is deliberately *heuristic*: it matches detected service/product/version
-//! banners against a curated, embedded signature table of well-known issues.
-//! It is not a full vulnerability scanner and does not perform exploitation --
-//! it flags likely-vulnerable versions so you know where to look deeper.
+//! Esto es deliberadamente *heurístico*: compara los banners de servicio/producto/versión
+//! detectados contra una tabla de firmas curada e incrustada de problemas conocidos.
+//! No es un escáner de vulnerabilidades completo y no realiza explotación;
+//! marca versiones probablemente vulnerables para que sepas dónde mirar más profundo.
 
 pub mod cve;
 

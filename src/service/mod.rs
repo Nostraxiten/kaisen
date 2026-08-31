@@ -1,14 +1,15 @@
-//! Service & version detection via banner grabbing, protocol probes and TLS.
-//! All unprivileged: it just talks to the open TCP port like any client would.
+//! Detección de servicio y versión mediante captura de banners, sondeos de
+//! protocolo y TLS. Todo sin privilegios: simplemente habla con el puerto TCP
+//! abierto como lo haría cualquier cliente.
 //!
-//! Detection runs in three tiers, cheapest first:
-//!   1. **Listen** — protocols that greet you (SSH, SMTP, FTP, IMAP, VNC...).
-//!   2. **Probe** — a per-port plan that says the right thing to make a silent
-//!      service identify itself: an HTTP request, a TLS ClientHello, or one of
-//!      the binary handshakes in `probe.rs` (SMB, TDS, TNS, CQL, BSON...).
-//!   3. **Fallback** — for ports with no plan and no greeting, try HTTP, then
-//!      TLS, then a bare newline, because unusual ports are exactly where
-//!      unexpected web and TLS services live.
+//! La detección opera en tres niveles, del más barato al más caro:
+//!   1. **Escucha** — protocolos que te saludan (SSH, SMTP, FTP, IMAP, VNC...).
+//!   2. **Sondeo** — un plan por puerto que dice lo correcto para que un servicio
+//!      silencioso se identifique: una petición HTTP, un ClientHello TLS, o uno
+//!      de los handshakes binarios en `probe.rs` (SMB, TDS, TNS, CQL, BSON...).
+//!   3. **Fallback** — para puertos sin plan y sin saludo, prueba HTTP, luego
+//!      TLS, luego un newline, porque los puertos inusuales son exactamente donde
+//!      viven servicios web y TLS inesperados.
 
 pub mod probe;
 pub mod web;

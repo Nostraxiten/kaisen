@@ -1,6 +1,6 @@
-//! Kaisen — a fast nmap + dig hybrid network scanner that runs without root.
+//! Kaisen — escáner de red rápido, híbrido de nmap + dig, sin necesidad de root.
 //!
-//! Entry point: parse args, then dispatch to the scanner or the DNS resolver.
+//! Punto de entrada: parsea los argumentos y despacha al escáner o al resolvedor DNS.
 
 mod cli;
 mod dns;
@@ -31,15 +31,16 @@ fn banner(p: &Painter) {
     eprintln!("{}", p.cyan(art));
 }
 
-/// Restore the default SIGPIPE behaviour.
+/// Restaura el comportamiento por defecto de SIGPIPE.
 ///
-/// Rust's runtime ignores SIGPIPE, so a write to a closed pipe returns EPIPE
-/// and `println!` panics on it. For a command-line tool that means
-/// `kaisen --vuln-list | head` dies with a backtrace instead of stopping
-/// quietly, which is what every other Unix tool does. There is no std API for
-/// this, and pulling in libc for one constant would be a poor trade, so the
-/// one symbol is declared here. SIGPIPE is 13 and SIG_DFL is 0 on Linux,
-/// Android and macOS alike.
+/// El runtime de Rust ignora SIGPIPE, por lo que una escritura en un pipe
+/// cerrado devuelve EPIPE y `println!` entra en pánico. Para una herramienta
+/// de línea de comandos eso significa que `kaisen --vuln-list | head` muere
+/// con un backtrace en lugar de detenerse en silencio, que es lo que hace
+/// cualquier otra herramienta Unix.
+///
+/// No hay API estándar para esto. SIGPIPE es 13 y SIG_DFL es 0 en Linux,
+/// Android y macOS por igual.
 #[cfg(unix)]
 fn restore_sigpipe() {
     extern "C" {
@@ -76,12 +77,12 @@ async fn main() -> ExitCode {
             println!("{}", cli::version_text());
             ExitCode::SUCCESS
         }
-        Mode::Dns => run_dns(&opts).await,
-        Mode::Mail => run_mail(&opts).await,
-        Mode::Lookup => run_lookup(&opts).await,
-        Mode::Whois => run_whois(&opts).await,
+        Mode::Dns      => run_dns(&opts).await,
+        Mode::Mail     => run_mail(&opts).await,
+        Mode::Lookup   => run_lookup(&opts).await,
+        Mode::Whois    => run_whois(&opts).await,
         Mode::Neighbor => run_neighbor(&opts).await,
-        Mode::NsAudit => run_nsaudit(&opts).await,
+        Mode::NsAudit  => run_nsaudit(&opts).await,
         Mode::VulnList => {
             vuln::print_catalogue(opts.min_severity, opts.color);
             ExitCode::SUCCESS
@@ -202,7 +203,7 @@ async fn lookup_profile(name: &str, server: std::net::SocketAddr, timeout_ms: u6
             }
             Ok(resp) => {
                 let _ = resp;
-                if p_verbose_none(t) {
+                if mostrar_ninguno(t) {
                     println!("{:<7} {}", p.magenta(t), p.dim("(none)"));
                 }
             }
@@ -213,12 +214,13 @@ async fn lookup_profile(name: &str, server: std::net::SocketAddr, timeout_ms: u6
     }
 }
 
-// Only show "(none)" lines for the record types users usually care to confirm.
-fn p_verbose_none(t: &str) -> bool {
+/// Solo muestra líneas "(none)" para los tipos de registro que los usuarios
+/// suelen querer confirmar explícitamente.
+fn mostrar_ninguno(t: &str) -> bool {
     matches!(t, "A" | "AAAA" | "MX" | "NS")
 }
 
-/// Resolve the DNS server to use (explicit @server / --dns-port, else system default).
+/// Resuelve el servidor DNS a usar (--dns / --dns-port explícito, o el predeterminado del sistema).
 async fn resolve_dns_server(opts: &Options) -> Result<std::net::SocketAddr, String> {
     let server_ip: IpAddr = match &opts.dns_server {
         Some(s) => match s.parse::<IpAddr>() {
@@ -257,10 +259,10 @@ async fn run_mail(opts: &Options) -> ExitCode {
 }
 
 async fn run_scan(opts_in: &Options) -> ExitCode {
-    // Focused `-OS` mode: when the user asks only for OS detection (no explicit
-    // ports, no -sV/-vuln/--open, normal output), Kaisen probes a small,
-    // high-signal port set and reports the OS + host context instead of the
-    // full port table. Each flag should mean one clear thing.
+    // Modo `-OS` enfocado: cuando el usuario solo pide detección de SO (sin puertos
+    // explícitos, sin -sV/-vuln/--open, salida normal), Kaisen sondea un conjunto
+    // pequeño de puertos de alta señal y muestra el SO + contexto del host en lugar
+    // de la tabla completa de puertos. Cada flag debe significar una sola cosa.
     let os_focus = opts_in.os_detection
         && !opts_in.service_detection
         && !opts_in.vuln
@@ -276,9 +278,9 @@ async fn run_scan(opts_in: &Options) -> ExitCode {
         owned.ports = ports::os_probe_ports();
         &owned
     } else if opts_in.device_detection {
-        // -DP needs a few device-signature ports (e.g. iPhone's 62078) that
-        // aren't in the default top-N list — union them in rather than
-        // replacing whatever port selection the user already made.
+        // -DP necesita algunos puertos de firma de dispositivo (ej. 62078 del iPhone)
+        // que no están en la lista top-N por defecto — se unen en lugar de reemplazar
+        // la selección de puertos que el usuario ya haya hecho.
         owned = opts_in.clone();
         let mut set: std::collections::BTreeSet<u16> = owned.ports.iter().copied().collect();
         set.extend(ports::DEVICE_PROBE_PORTS.iter().copied());
@@ -316,7 +318,7 @@ async fn run_scan(opts_in: &Options) -> ExitCode {
         );
     }
 
-    // Expand all targets first.
+    // Expandir todos los objetivos primero.
     let mut hosts: Vec<(String, IpAddr)> = Vec::new();
     for t in &opts.targets {
         match scan::expand_target(t, opts.ip_version).await {
@@ -325,10 +327,11 @@ async fn run_scan(opts_in: &Options) -> ExitCode {
         }
     }
 
-    // --exclude / --exclude-file: expand the exclusions the same way targets
-    // are expanded, so an exclusion can be written as an IP, a hostname or a
-    // CIDR exactly like a target, then drop any address that matches. Removing
-    // hosts silently would be the wrong kind of quiet, so the count is stated.
+    // --exclude / --exclude-file: expandir las exclusiones del mismo modo que los
+    // objetivos, para que una exclusión pueda escribirse como IP, hostname o CIDR
+    // exactamente igual que un target, y luego descartar cualquier dirección que
+    // coincida. Eliminar hosts en silencio sería el tipo equivocado de silencio,
+    // así que se indica el recuento.
     if !opts.exclude.is_empty() {
         let mut excluded: std::collections::HashSet<IpAddr> = std::collections::HashSet::new();
         for spec in &opts.exclude {
@@ -360,9 +363,9 @@ async fn run_scan(opts_in: &Options) -> ExitCode {
     let mut up_count = 0usize;
     let sweep_start = Instant::now();
 
-    // Fast liveness sweep across every target at once (ping + a couple of
-    // common ports), the same shape nmap uses — so the expensive full port
-    // scan below only runs against hosts that actually answered something.
+    // Barrido rápido de disponibilidad sobre todos los objetivos a la vez (ping +
+    // un par de puertos comunes), con la misma forma que usa nmap — así el costoso
+    // escaneo de puertos completo solo se ejecuta contra los hosts que respondieron.
     let alive = scan::discover_alive(&hosts, opts).await;
 
     for (idx, (target, ip)) in hosts.into_iter().enumerate() {
@@ -390,8 +393,8 @@ async fn run_scan(opts_in: &Options) -> ExitCode {
         println!("]");
     }
 
-    // Nmap-style tally: with many targets and mostly-silent hosts skipped
-    // from the report above, this is the only place their count shows up.
+    // Recuento al estilo nmap: con muchos objetivos y hosts mayormente silenciosos
+    // omitidos del informe anterior, este es el único lugar donde su recuento aparece.
     if opts.output == OutputFormat::Normal {
         println!();
         println!(
@@ -406,7 +409,7 @@ async fn run_scan(opts_in: &Options) -> ExitCode {
     if any_open {
         ExitCode::SUCCESS
     } else {
-        // Not an error, but signal "nothing open" via code 1 for scripting.
+        // No es un error, pero señala "nada abierto" mediante código 1 para scripting.
         ExitCode::SUCCESS
     }
 }
@@ -420,9 +423,9 @@ async fn run_dns(opts: &Options) -> ExitCode {
         return ExitCode::from(2);
     }
 
-    // Warn if scan options were mixed with a DNS action (-x / -D / @server /
-    // dns subcommand). These belong to different subsystems, so the scan flags
-    // are ignored here — tell the user instead of silently dropping them.
+    // Avisar si se mezclaron opciones de escaneo con una acción DNS (-x / -D / @server /
+    // subcomando dns). Pertenecen a subsistemas diferentes, así que los flags de escaneo
+    // se ignoran aquí — informar al usuario en lugar de descartarlos en silencio.
     if opts.os_detection
         || opts.service_detection
         || opts.vuln
@@ -440,14 +443,14 @@ async fn run_dns(opts: &Options) -> ExitCode {
         );
     }
 
-    // Determine server. With +dot and no @server, the system resolver is the
-    // wrong default — it almost certainly does not listen on 853 — so a named
-    // DoT resolver stands in, and the name is stated in --help rather than
-    // being a surprise.
+    // Determinar el servidor. Con +dot y sin @server, el resolvedor del sistema es el
+    // predeterminado incorrecto — casi con certeza no escucha en el 853 — así que se
+    // usa un resolvedor DoT nombrado, y el nombre se indica en --help en lugar de ser
+    // una sorpresa.
     let explicit_server = opts.dns_server.clone();
     let dot_name = match (&explicit_server, opts.dns_dot) {
         (Some(s), _) => s.clone(),
-        (None, true) => dns::DEFAULT_DOT_HOST.to_string(),
+        (None, true)  => dns::DEFAULT_DOT_HOST.to_string(),
         (None, false) => String::new(),
     };
     let effective_server = if opts.dns_dot && explicit_server.is_none() {
@@ -460,7 +463,7 @@ async fn run_dns(opts: &Options) -> ExitCode {
         Some(s) => match s.parse::<IpAddr>() {
             Ok(ip) => ip,
             Err(_) => {
-                // resolve the server hostname
+                // Resolver el hostname del servidor
                 match tokio::net::lookup_host((s.as_str(), opts.dns_port)).await {
                     Ok(mut it) => match it.next() {
                         Some(sa) => sa.ip(),
@@ -483,8 +486,8 @@ async fn run_dns(opts: &Options) -> ExitCode {
     let timeout_ms = opts.timing.connect_timeout_ms.max(2000);
     let mut had_error = false;
 
-    // +trace: walk the delegation chain from the root instead of asking one
-    // resolver for the final answer.
+    // +trace: recorre la cadena de delegación desde la raíz en lugar de preguntar a un
+    // resolvedor por la respuesta final.
     if opts.dns_trace {
         for target in &opts.targets {
             let qtype_s = opts.dns_types.first().cloned().unwrap_or_else(|| "A".to_string());
@@ -494,7 +497,7 @@ async fn run_dns(opts: &Options) -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    // An explicit AXFR request is a zone transfer, not an ordinary query.
+    // Una petición AXFR explícita es una transferencia de zona, no una consulta ordinaria.
     if opts.dns_types.iter().any(|t| t == "AXFR") {
         for target in &opts.targets {
             match dns::axfr(server, target, timeout_ms).await {
@@ -531,7 +534,7 @@ async fn run_dns(opts: &Options) -> ExitCode {
     }
 
     for target in &opts.targets {
-        // Build the list of (query_name, type) pairs.
+        // Construir la lista de pares (nombre_consulta, tipo).
         let queries: Vec<(String, String)> = if opts.dns_reverse {
             match target.parse::<IpAddr>() {
                 Ok(ip) => vec![(dns::reverse_name(ip), "PTR".to_string())],
@@ -569,8 +572,8 @@ async fn run_dns(opts: &Options) -> ExitCode {
                 udp_size: if opts.dns_dnssec || opts.dns_nsid { 4096 } else { 0 },
                 client_subnet: opts.dns_subnet,
             };
-            // +dot / --doh take the query down an encrypted channel; anything
-            // else is the ordinary UDP-with-TCP-fallback path.
+            // +dot / --doh envían la consulta por un canal cifrado; cualquier otra cosa
+            // usa el camino UDP con fallback TCP automático en caso de truncamiento.
             let result = if let Some(url) = &opts.dns_doh {
                 dns::query_doh(url, &qname, qtype, &qopts)
                     .await
@@ -607,9 +610,9 @@ async fn run_dns(opts: &Options) -> ExitCode {
     }
 }
 
-/// Render an iterative resolution the way `dig +trace` does: one block per
-/// delegation hop, so a broken delegation is visible as the hop where the
-/// chain stops rather than as a bare SERVFAIL.
+/// Muestra una resolución iterativa al estilo `dig +trace`: un bloque por salto
+/// de delegación, para que una delegación rota sea visible como el salto donde
+/// la cadena se detiene en lugar de como un simple SERVFAIL.
 async fn print_trace(name: &str, qtype_s: &str, qtype: u16, timeout_ms: u64, p: &Painter) {
     println!();
     println!(
@@ -650,7 +653,7 @@ async fn print_trace(name: &str, qtype_s: &str, qtype: u16, timeout_ms: u64, p: 
                 );
             }
         } else {
-            // A referral: list the nameservers this level delegates to.
+            // Referral: listar los servidores de nombres a los que delega este nivel.
             for a in step.response.authorities.iter().take(8) {
                 println!(
                     "    {:<28} {:<7} {:<8} {}",
@@ -678,9 +681,9 @@ async fn print_trace(name: &str, qtype_s: &str, qtype: u16, timeout_ms: u64, p: 
     }
 }
 
-/// Say how an encrypted query travelled, and what that does and does not
-/// prove. The caveat is printed every time, not only under -v: a user reading
-/// "encrypted" should never have to guess how far the guarantee reaches.
+/// Muestra cómo viajó una consulta cifrada y qué demuestra y qué no demuestra.
+/// La advertencia se imprime siempre, no solo con -v: un usuario que lee
+/// "encrypted" no debería tener que adivinar hasta dónde llega la garantía.
 fn print_secure_info(info: &dns::SecureInfo, opts: &Options, p: &Painter) {
     if opts.dns_short {
         return;
@@ -736,8 +739,8 @@ fn print_dns(qname: &str, qtype: &str, resp: &dns::Response, opts: &Options, p: 
         println!(";; NSID: {}", p.cyan(nsid));
     }
     if let Some(scope) = resp.ecs_scope {
-        // The scope is the server's own statement about how location-dependent
-        // this answer is: 0 means it would say the same thing to everyone.
+        // El scope es la declaración propia del servidor sobre cuánto depende la respuesta
+        // de la ubicación: 0 significa que diría lo mismo a cualquiera.
         let note = if scope == 0 {
             "the answer does not depend on the client network".to_string()
         } else {

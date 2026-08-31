@@ -1,10 +1,10 @@
-//! Hand-rolled argument parser.
+//! Parser de argumentos escrito a mano.
 //!
-//! We can't use a standard `-x` short-flag parser because Kaisen's headline
-//! flags are *multi-letter* shorts (`-OS`, `-HS`, `-PF`, `-PA`, `-sV`, `-Pn`).
-//! A getopt-style parser would split `-OS` into `-O -S`. So we tokenise
-//! explicitly and match whole tokens, while still supporting stacked
-//! verbosity (`-vvv`) and nmap-style long options.
+//! No se puede usar un parser estándar de flags cortos `-x` porque los flags
+//! principales de Kaisen son *multi-letra* (`-OS`, `-HS`, `-PF`, `-PA`, `-sV`, `-Pn`).
+//! Un parser tipo getopt partiría `-OS` en `-O -S`. Por eso se tokeniza
+//! explícitamente y se comparan tokens completos, manteniendo al mismo tiempo
+//! la verbosidad apilada (`-vvv`) y las opciones largas al estilo nmap.
 
 use crate::ports;
 
@@ -19,7 +19,7 @@ pub enum Mode {
     Whois,
     Neighbor,
     NsAudit,
-    /// --vuln-list: print the signature database and exit, touching nothing.
+    /// --vuln-list: imprime la base de datos de firmas y sale sin tocar nada.
     VulnList,
     Help,
     Version,
@@ -27,9 +27,9 @@ pub enum Mode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ScanKind {
-    /// TCP connect() — works without root. The default and the fast path.
+    /// TCP connect() — funciona sin root. La ruta por defecto y la más rápida.
     Connect,
-    /// SYN half-open — needs raw sockets/root; falls back to Connect if denied.
+    /// SYN half-open — necesita raw sockets/root; cae a Connect si se deniega.
     Syn,
 }
 
@@ -46,62 +46,60 @@ pub struct Timing {
     pub connect_timeout_ms: u64,
     pub retries: u32,
     pub host_delay_ms: u64,
-    /// Maximum new TCP connections launched per second (token-bucket rate
-    /// limiter). 0 means unlimited. Set for T0–T3 to avoid filling the NAT
-    /// router's conntrack table — each timed-out connect() leaves a zombie
-    /// entry for up to 120 s even after Kaisen moves on. T4/T5 skip the
-    /// limiter because they target local nets with no NAT in the path.
+    /// Máximo de nuevas conexiones TCP por segundo (limitador de tasa token-bucket).
+    /// 0 significa sin límite. Se activa en T0–T3 para evitar llenar la tabla
+    /// conntrack del router NAT — cada connect() con timeout deja una entrada zombie
+    /// durante hasta 120 s incluso después de que Kaisen siga adelante. T4/T5 omiten
+    /// el limitador porque apuntan a redes locales sin NAT en el camino.
     pub max_rate: u32,
 }
 
 impl Timing {
-    /// Map an nmap-style timing template (0..5) to concrete parameters.
+    /// Mapea una plantilla de temporización al estilo nmap (0..5) a parámetros concretos.
     ///
-    /// ## connect() and NAT conntrack
+    /// ## connect() y NAT conntrack
     ///
-    /// Unlike nmap's raw-SYN scan (`-sS`), Kaisen uses `connect()` which goes
-    /// through the kernel's normal TCP stack. Every outgoing SYN creates an
-    /// entry in the NAT router's conntrack table. When a port times out (no
-    /// SYN-ACK), Kaisen moves on — but the **router** keeps that zombie entry
-    /// for its own `nf_conntrack_tcp_timeout_syn_sent` (typically 60–120 s),
-    /// independent of Kaisen's timeout. If the table fills up, the router drops
-    /// all traffic (including DNS), killing the local internet connection.
+    /// A diferencia del escaneo raw-SYN de nmap (`-sS`), Kaisen usa `connect()` que pasa
+    /// por la pila TCP normal del kernel. Cada SYN saliente crea una entrada en la tabla
+    /// conntrack del router NAT. Cuando un puerto expira (sin SYN-ACK), Kaisen avanza,
+    /// pero el **router** mantiene esa entrada zombie durante su propio
+    /// `nf_conntrack_tcp_timeout_syn_sent` (normalmente 60–120 s),
+    /// independientemente del timeout de Kaisen. Si la tabla se llena, el router descarta
+    /// todo el tráfico (incluyendo DNS), matando la conexión a internet local.
     ///
-    /// T3's concurrency of 30 is chosen to stay well within the conntrack table
-    /// of a typical home router (usually 1 024–4 096 entries). T4 stays
-    /// WAN-safe too — faster, but still rate-capped, because users reach for it
-    /// to speed up internet scans, not just LAN ones. Only T5 (and `-HS`) drop
-    /// the guard rails entirely, for a LAN or isolated lab with no NAT and no
-    /// stateful firewall in the path.
+    /// La concurrencia 30 de T3 se elige para mantenerse bien dentro de la tabla conntrack
+    /// de un router doméstico típico (normalmente 1.024–4.096 entradas). T4 también es
+    /// seguro para WAN — más rápido pero aún con limitación de tasa, porque los usuarios
+    /// lo usan para acelerar escaneos de internet, no solo LAN. Solo T5 (y `-HS`) eliminan
+    /// las protecciones, para una LAN o laboratorio aislado sin NAT ni cortafuegos.
     pub fn from_template(t: u8) -> Timing {
         match t {
             0 => Timing { concurrency: 1,   connect_timeout_ms: 5000, retries: 3, host_delay_ms: 500, max_rate: 5   },
             1 => Timing { concurrency: 10,  connect_timeout_ms: 3000, retries: 2, host_delay_ms: 100, max_rate: 15  },
             2 => Timing { concurrency: 20,  connect_timeout_ms: 2000, retries: 2, host_delay_ms: 10,  max_rate: 30  },
-            // T3 (default): 30 concurrent, 50/s rate cap — safe for home-router
-            // NAT conntrack. Each timed-out connect() leaves a zombie entry in
-            // the router for 60-120 s; the rate cap keeps the SYN rate low
-            // enough that a stateful firewall doesn't flag the sweep and start
-            // dropping every packet — the failure mode that returns "0 open" on
-            // a reachable host. nmap avoids this via raw SYN (-sS); connect()
-            // cannot.
+            // T3 (defecto): 30 concurrentes, limitación 50/s — seguro para conntrack del
+            // router doméstico. Cada connect() con timeout deja una entrada zombie en el
+            // router por 60-120 s; el límite de tasa mantiene la tasa de SYN lo bastante
+            // baja para que un cortafuegos con estado no marque el barrido y empiece a
+            // descartar paquetes — el modo de fallo que devuelve "0 open" en un host
+            // alcanzable. nmap evita esto con raw SYN (-sS); connect() no puede.
             3 => Timing { concurrency: 30,  connect_timeout_ms: 1500, retries: 1, host_delay_ms: 0,   max_rate: 50  },
-            // T4: fast but still WAN-safe. 100 concurrent with a 150/s cap is
-            // ~3x T3's throughput while staying under the burst threshold that
-            // makes a home router drop the whole sweep (including the open
-            // ports). Uncapped 150-concurrency here used to return "0 open" on
-            // real internet hosts even though 80/443 were up.
+            // T4: rápido pero aún seguro para WAN. 100 concurrentes con un límite de 150/s
+            // es ~3x el rendimiento de T3 manteniéndose por debajo del umbral de ráfaga que
+            // hace que un router doméstico descarte todo el barrido (incluidos los puertos
+            // abiertos). Con 150 concurrentes sin límite antes devolvía "0 open" en hosts
+            // reales de internet aunque 80/443 estuvieran activos.
             4 => Timing { concurrency: 100, connect_timeout_ms: 1000, retries: 1, host_delay_ms: 0,   max_rate: 150 },
-            // T5: insane — no rate cap, LAN / lab only (no NAT, no stateful
-            // firewall). On the internet this will drop packets; that's the
-            // trade you opt into. Override the cap back on with --max-rate.
+            // T5: insano — sin límite de tasa, solo para LAN / laboratorio (sin NAT, sin
+            // cortafuegos con estado). En internet descartará paquetes; es el compromiso
+            // al que se opta. Se puede volver a activar el límite con --max-rate.
             5 => Timing { concurrency: 500, connect_timeout_ms: 400,  retries: 0, host_delay_ms: 0,   max_rate: 0   },
             _ => Timing::from_template(3),
         }
     }
 
-    /// Hyper-speed (`-HS`): as fast as the host machine can reasonably push
-    /// without exhausting file descriptors on constrained systems like Termux.
+    /// Hyper-speed (`-HS`): tan rápido como la máquina pueda razonablemente empujar
+    /// sin agotar los descriptores de fichero en sistemas limitados como Termux.
     pub fn hyper() -> Timing {
         Timing { concurrency: 3000, connect_timeout_ms: 300, retries: 0, host_delay_ms: 0, max_rate: 0 }
     }
