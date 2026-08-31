@@ -4,8 +4,8 @@
 //! over UDP with automatic TCP fallback on truncation. Supports the common
 //! record types and querying arbitrary servers, all unprivileged.
 
-pub mod whois;
 pub mod nsaudit;
+pub mod whois;
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::time::Duration;
@@ -152,7 +152,10 @@ pub enum RData {
     A(Ipv4Addr),
     Aaaa(Ipv6Addr),
     Name(String),
-    Mx { pref: u16, exchange: String },
+    Mx {
+        pref: u16,
+        exchange: String,
+    },
     Txt(Vec<String>),
     Soa {
         mname: String,
@@ -262,22 +265,49 @@ impl RData {
                 .map(|p| format!("\"{p}\""))
                 .collect::<Vec<_>>()
                 .join(" "),
-            RData::Soa { mname, rname, serial, refresh, retry, expire, minimum } => {
+            RData::Soa {
+                mname,
+                rname,
+                serial,
+                refresh,
+                retry,
+                expire,
+                minimum,
+            } => {
                 format!("{mname} {rname} {serial} {refresh} {retry} {expire} {minimum}")
             }
-            RData::Srv { priority, weight, port, target } => {
+            RData::Srv {
+                priority,
+                weight,
+                port,
+                target,
+            } => {
                 format!("{priority} {weight} {port} {target}")
             }
             RData::Caa { flags, tag, value } => format!("{flags} {tag} \"{value}\""),
-            RData::Ds { key_tag, algorithm, digest_type, digest } => format!(
+            RData::Ds {
+                key_tag,
+                algorithm,
+                digest_type,
+                digest,
+            } => format!(
                 "{key_tag} {algorithm} ({}) {digest_type} ({}) {}",
                 dnssec_alg(*algorithm),
                 digest_alg(*digest_type),
                 hex(digest)
             ),
-            RData::Dnskey { flags, protocol, algorithm, key } => {
+            RData::Dnskey {
+                flags,
+                protocol,
+                algorithm,
+                key,
+            } => {
                 let role = if flags & 0x0001 != 0 {
-                    if flags & 0x0100 != 0 { "KSK" } else { "secure entry point" }
+                    if flags & 0x0100 != 0 {
+                        "KSK"
+                    } else {
+                        "secure entry point"
+                    }
                 } else if flags & 0x0100 != 0 {
                     "ZSK"
                 } else {
@@ -291,7 +321,14 @@ impl RData {
                 )
             }
             RData::Rrsig {
-                type_covered, algorithm, labels, original_ttl, expiration, inception, key_tag, signer,
+                type_covered,
+                algorithm,
+                labels,
+                original_ttl,
+                expiration,
+                inception,
+                key_tag,
+                signer,
             } => format!(
                 "{} {} ({}) {labels} {original_ttl} exp {} inc {} tag {key_tag} {signer}",
                 num_to_type(*type_covered),
@@ -301,32 +338,78 @@ impl RData {
                 fmt_time(*inception)
             ),
             RData::Nsec { next, types } => {
-                format!("{next} {}", types.iter().map(|t| num_to_type(*t)).collect::<Vec<_>>().join(" "))
+                format!(
+                    "{next} {}",
+                    types
+                        .iter()
+                        .map(|t| num_to_type(*t))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                )
             }
-            RData::Nsec3 { hash_alg, flags, iterations, salt, next_hashed, types } => format!(
+            RData::Nsec3 {
+                hash_alg,
+                flags,
+                iterations,
+                salt,
+                next_hashed,
+                types,
+            } => format!(
                 "{hash_alg} {flags} {iterations} {} {} {}",
-                if salt.is_empty() { "-".to_string() } else { hex(salt) },
+                if salt.is_empty() {
+                    "-".to_string()
+                } else {
+                    hex(salt)
+                },
                 base32hex(next_hashed),
-                types.iter().map(|t| num_to_type(*t)).collect::<Vec<_>>().join(" ")
+                types
+                    .iter()
+                    .map(|t| num_to_type(*t))
+                    .collect::<Vec<_>>()
+                    .join(" ")
             ),
-            RData::Tlsa { usage, selector, matching, data } => format!(
+            RData::Tlsa {
+                usage,
+                selector,
+                matching,
+                data,
+            } => format!(
                 "{usage} ({}) {selector} ({}) {matching} ({}) {}",
                 tlsa_usage(*usage),
                 tlsa_selector(*selector),
                 tlsa_matching(*matching),
                 hex(data)
             ),
-            RData::Sshfp { algorithm, fp_type, fingerprint } => format!(
+            RData::Sshfp {
+                algorithm,
+                fp_type,
+                fingerprint,
+            } => format!(
                 "{algorithm} ({}) {fp_type} ({}) {}",
                 sshfp_alg(*algorithm),
                 sshfp_fptype(*fp_type),
                 hex(fingerprint)
             ),
-            RData::Naptr { order, preference, flags, service, regexp, replacement } => format!(
-                "{order} {preference} \"{flags}\" \"{service}\" \"{regexp}\" {replacement}"
-            ),
-            RData::Svcb { priority, target, params } => {
-                let target = if target.is_empty() { "." } else { target.as_str() };
+            RData::Naptr {
+                order,
+                preference,
+                flags,
+                service,
+                regexp,
+                replacement,
+            } => {
+                format!("{order} {preference} \"{flags}\" \"{service}\" \"{regexp}\" {replacement}")
+            }
+            RData::Svcb {
+                priority,
+                target,
+                params,
+            } => {
+                let target = if target.is_empty() {
+                    "."
+                } else {
+                    target.as_str()
+                };
                 let mut s = format!("{priority} {target}");
                 for (key, value) in params {
                     s.push(' ');
@@ -334,9 +417,17 @@ impl RData {
                 }
                 s
             }
-            RData::Uri { priority, weight, target } => format!("{priority} {weight} \"{target}\""),
+            RData::Uri {
+                priority,
+                weight,
+                target,
+            } => format!("{priority} {weight} \"{target}\""),
             RData::Hinfo { cpu, os } => format!("\"{cpu}\" \"{os}\""),
-            RData::Eui(bytes) => bytes.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join("-"),
+            RData::Eui(bytes) => bytes
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<Vec<_>>()
+                .join("-"),
             RData::Other(_, bytes) => format!("<{} bytes>", bytes.len()),
         }
     }
@@ -485,7 +576,9 @@ pub fn parse_client_subnet(s: &str) -> Result<(IpAddr, u8), String> {
         }
     };
     if prefix > max {
-        return Err(format!("+subnet: /{prefix} is out of range for this address"));
+        return Err(format!(
+            "+subnet: /{prefix} is out of range for this address"
+        ));
     }
     Ok((addr, prefix))
 }
@@ -621,7 +714,12 @@ fn read_u32(msg: &[u8], pos: usize) -> Result<u32, String> {
     if pos + 4 > msg.len() {
         return Err("truncated u32".into());
     }
-    Ok(u32::from_be_bytes([msg[pos], msg[pos + 1], msg[pos + 2], msg[pos + 3]]))
+    Ok(u32::from_be_bytes([
+        msg[pos],
+        msg[pos + 1],
+        msg[pos + 2],
+        msg[pos + 3],
+    ]))
 }
 
 fn parse_rdata(msg: &[u8], rtype: u16, rdstart: usize, rdlen: usize) -> Result<RData, String> {
@@ -634,7 +732,12 @@ fn parse_rdata(msg: &[u8], rtype: u16, rdstart: usize, rdlen: usize) -> Result<R
             if rdlen != 4 {
                 return Err("bad A rdata".into());
             }
-            RData::A(Ipv4Addr::new(msg[rdstart], msg[rdstart + 1], msg[rdstart + 2], msg[rdstart + 3]))
+            RData::A(Ipv4Addr::new(
+                msg[rdstart],
+                msg[rdstart + 1],
+                msg[rdstart + 2],
+                msg[rdstart + 3],
+            ))
         }
         28 => {
             if rdlen != 16 {
@@ -685,7 +788,12 @@ fn parse_rdata(msg: &[u8], rtype: u16, rdstart: usize, rdlen: usize) -> Result<R
             let weight = read_u16(msg, rdstart + 2)?;
             let port = read_u16(msg, rdstart + 4)?;
             let (target, _) = parse_name(msg, rdstart + 6)?;
-            RData::Srv { priority, weight, port, target }
+            RData::Srv {
+                priority,
+                weight,
+                port,
+                target,
+            }
         }
         257 => {
             let flags = msg[rdstart];
@@ -724,7 +832,10 @@ fn parse_rdata(msg: &[u8], rtype: u16, rdstart: usize, rdlen: usize) -> Result<R
         }
         47 => {
             let (next, p) = parse_name(msg, rdstart)?;
-            RData::Nsec { next, types: parse_type_bitmap(msg, p, end) }
+            RData::Nsec {
+                next,
+                types: parse_type_bitmap(msg, p, end),
+            }
         }
         50 if rdlen >= 5 => {
             let salt_len = msg[rdstart + 4] as usize;
@@ -788,7 +899,11 @@ fn parse_rdata(msg: &[u8], rtype: u16, rdstart: usize, rdlen: usize) -> Result<R
                 params.push((key, msg[i..i + len].to_vec()));
                 i += len;
             }
-            RData::Svcb { priority: read_u16(msg, rdstart)?, target, params }
+            RData::Svcb {
+                priority: read_u16(msg, rdstart)?,
+                target,
+                params,
+            }
         }
         256 if rdlen >= 4 => RData::Uri {
             priority: read_u16(msg, rdstart)?,
@@ -914,7 +1029,13 @@ fn extract_nsid(additionals: &[Record]) -> Option<String> {
     // NSID is opaque bytes; most servers put ASCII in it.
     Some(
         raw.iter()
-            .map(|&b| if (0x20..0x7f).contains(&b) { b as char } else { '.' })
+            .map(|&b| {
+                if (0x20..0x7f).contains(&b) {
+                    b as char
+                } else {
+                    '.'
+                }
+            })
             .collect(),
     )
 }
@@ -959,7 +1080,12 @@ fn parse_response(msg: &[u8]) -> Result<(u8, Vec<Record>, Vec<Record>, Vec<Recor
             let rdlen = read_u16(msg, p + 8)? as usize;
             let rdstart = p + 10;
             let data = parse_rdata(msg, rtype, rdstart, rdlen)?;
-            out.push(Record { name, rtype, ttl, data });
+            out.push(Record {
+                name,
+                rtype,
+                ttl,
+                data,
+            });
             *pos = rdstart + rdlen;
         }
         Ok(out)
@@ -1031,7 +1157,11 @@ fn dnskey_tag(flags: u16, protocol: u8, algorithm: u8, key: &[u8]) -> u32 {
     rdata.extend_from_slice(key);
     let mut acc: u32 = 0;
     for (i, b) in rdata.iter().enumerate() {
-        acc += if i % 2 == 0 { (*b as u32) << 8 } else { *b as u32 };
+        acc += if i % 2 == 0 {
+            (*b as u32) << 8
+        } else {
+            *b as u32
+        };
     }
     acc += (acc >> 16) & 0xffff;
     acc & 0xffff
@@ -1140,7 +1270,10 @@ fn svcb_param(key: u16, value: &[u8]) -> String {
         2 => "no-default-alpn".to_string(),
         3 => format!(
             "port={}",
-            value.first().map(|_| ((value[0] as u16) << 8) | *value.get(1).unwrap_or(&0) as u16).unwrap_or(0)
+            value
+                .first()
+                .map(|_| ((value[0] as u16) << 8) | *value.get(1).unwrap_or(&0) as u16)
+                .unwrap_or(0)
         ),
         4 => {
             let ips: Vec<String> = value
@@ -1187,7 +1320,11 @@ pub async fn query(
         server,
         name,
         qtype,
-        &QueryOpts { force_tcp, timeout_ms, ..Default::default() },
+        &QueryOpts {
+            force_tcp,
+            timeout_ms,
+            ..Default::default()
+        },
     )
     .await
 }
@@ -1361,7 +1498,8 @@ pub async fn query_dot(
         .map_err(|_| "DoT connect timed out".to_string())?
         .map_err(|e| format!("DoT connect failed: {e}"))?;
 
-    let mut tls = crate::tls::tls13::handshake(stream, tls_name, &["dot"], o.timeout_ms.max(3000)).await?;
+    let mut tls =
+        crate::tls::tls13::handshake(stream, tls_name, &["dot"], o.timeout_ms.max(3000)).await?;
 
     let mut framed = Vec::with_capacity(packet.len() + 2);
     framed.extend_from_slice(&(packet.len() as u16).to_be_bytes());
@@ -1562,12 +1700,7 @@ fn http_body(raw: &[u8]) -> Option<Vec<u8>> {
     }
 
     if let Some(pos) = head.find("content-length:") {
-        let len: usize = head[pos + 15..]
-            .lines()
-            .next()?
-            .trim()
-            .parse()
-            .ok()?;
+        let len: usize = head[pos + 15..].lines().next()?.trim().parse().ok()?;
         if body.len() < len {
             return None;
         }
@@ -1730,9 +1863,11 @@ pub async fn trace(name: &str, qtype: u16, timeout_ms: u64) -> Vec<TraceStep> {
         // would have to resolve the nameserver's own name first.
         let mut next: Vec<(String, IpAddr)> = Vec::new();
         for ns in &delegation {
-            if let Some(glue) = resp.additionals.iter().find(|a| {
-                a.name.eq_ignore_ascii_case(ns) && matches!(a.data, RData::A(_))
-            }) {
+            if let Some(glue) = resp
+                .additionals
+                .iter()
+                .find(|a| a.name.eq_ignore_ascii_case(ns) && matches!(a.data, RData::A(_)))
+            {
                 if let RData::A(ip) = glue.data {
                     next.push((ns.clone(), IpAddr::V4(ip)));
                 }

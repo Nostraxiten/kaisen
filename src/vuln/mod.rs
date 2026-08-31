@@ -7,12 +7,12 @@
 
 pub mod cve;
 
-use crate::util::output::Painter;
 use crate::service::ServiceInfo;
+use crate::util::output::Painter;
 
 #[derive(Debug, Clone)]
 pub struct Finding {
-    pub id: String,       // CVE or identifier
+    pub id: String, // CVE or identifier
     pub severity: Severity,
     pub title: String,
     pub detail: String,
@@ -1499,9 +1499,18 @@ struct Gate {
 }
 
 const GATES: &[Gate] = &[
-    Gate { id: "KAISEN-AJP-GHOSTCAT", confirm: confirm_ajp },
-    Gate { id: "KAISEN-JMX", confirm: confirm_jmx },
-    Gate { id: "KAISEN-KUBE-API", confirm: confirm_kube },
+    Gate {
+        id: "KAISEN-AJP-GHOSTCAT",
+        confirm: confirm_ajp,
+    },
+    Gate {
+        id: "KAISEN-JMX",
+        confirm: confirm_jmx,
+    },
+    Gate {
+        id: "KAISEN-KUBE-API",
+        confirm: confirm_kube,
+    },
 ];
 
 fn gate_for(id: &str) -> Option<&'static Gate> {
@@ -2692,7 +2701,8 @@ pub async fn assess_active(
 
     // Meilisearch with no master key: every route is public.
     if port == 7700 || hay.contains("meilisearch") {
-        if let Some((code, body)) = crate::service::probe::http_get(addr, "", "/indexes", dur).await {
+        if let Some((code, body)) = crate::service::probe::http_get(addr, "", "/indexes", dur).await
+        {
             let looks_like_data = body.contains("\"results\"")
                 || body.contains("\"uid\"")
                 || body.trim_start().starts_with('[');
@@ -2712,7 +2722,8 @@ pub async fn assess_active(
     // the two by shared id.
     if matches!(port, 6443 | 8443 | 10250) && !svc.tls_version.is_empty() {
         let sni = addr.ip().to_string();
-        if let Some((_, body)) = crate::service::probe::https_get(addr, &sni, "/version", dur).await {
+        if let Some((_, body)) = crate::service::probe::https_get(addr, &sni, "/version", dur).await
+        {
             let is_kube = body.contains("\"gitVersion\"")
                 || (body.contains("\"major\"") && body.contains("\"minor\""));
             if is_kube {
@@ -2820,8 +2831,16 @@ pub fn dedup_findings(findings: &mut Vec<Finding>) {
 /// come from the TLS prober rather than from any product signature, but they
 /// are part of the database and are listed as such.
 const CERT_CHECKS: &[(&str, Severity, &str)] = &[
-    ("KAISEN-TLS-EXPIRED", Severity::Medium, "TLS certificate has expired"),
-    ("KAISEN-TLS-SELFSIGNED", Severity::Low, "TLS certificate is self-signed"),
+    (
+        "KAISEN-TLS-EXPIRED",
+        Severity::Medium,
+        "TLS certificate has expired",
+    ),
+    (
+        "KAISEN-TLS-SELFSIGNED",
+        Severity::Low,
+        "TLS certificate is self-signed",
+    ),
 ];
 
 /// Column widths, measured from the tables: the longest id is 24 characters
@@ -2831,7 +2850,11 @@ const ID_WIDTH: usize = 26;
 const SUBJECT_WIDTH: usize = 32;
 
 fn ports_label(ports: &[u16]) -> String {
-    ports.iter().map(|p| p.to_string()).collect::<Vec<_>>().join(",")
+    ports
+        .iter()
+        .map(|p| p.to_string())
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// Print the whole database: every rule Kaisen can fire, with no network
@@ -2880,7 +2903,10 @@ pub fn print_catalogue(min: Option<Severity>, color: bool) {
     let mut shown = 0usize;
 
     println!();
-    println!("{}", p.bold("VERSION SIGNATURES  (product + version predicate)"));
+    println!(
+        "{}",
+        p.bold("VERSION SIGNATURES  (product + version predicate)")
+    );
     for s in SIGS {
         if !keep(s.severity) {
             continue;
@@ -2890,7 +2916,10 @@ pub fn print_catalogue(min: Option<Severity>, color: bool) {
     }
 
     println!();
-    println!("{}", p.bold("CVE CORRELATION  (product + affected version range)"));
+    println!(
+        "{}",
+        p.bold("CVE CORRELATION  (product + affected version range)")
+    );
     for e in crate::vuln::cve::CVE_DB {
         if !keep(e.severity) {
             continue;
@@ -2900,7 +2929,10 @@ pub fn print_catalogue(min: Option<Severity>, color: bool) {
     }
 
     println!();
-    println!("{}", p.bold("TCP PORT EXPOSURE  (reachable at all is the finding)"));
+    println!(
+        "{}",
+        p.bold("TCP PORT EXPOSURE  (reachable at all is the finding)")
+    );
     for e in TCP_EXPOSURES {
         if !keep(e.severity) {
             continue;
@@ -2920,7 +2952,10 @@ pub fn print_catalogue(min: Option<Severity>, color: bool) {
     }
 
     println!();
-    println!("{}", p.bold("UDP PROBE CONDITIONS  (what the probe established, not the port)"));
+    println!(
+        "{}",
+        p.bold("UDP PROBE CONDITIONS  (what the probe established, not the port)")
+    );
     for c in UDP_CONDITIONS {
         if !keep(c.severity) {
             continue;
@@ -2930,7 +2965,10 @@ pub fn print_catalogue(min: Option<Severity>, color: bool) {
     }
 
     println!();
-    println!("{}", p.bold("ACTIVE CHECKS  (-vuln speaks one request to confirm)"));
+    println!(
+        "{}",
+        p.bold("ACTIVE CHECKS  (-vuln speaks one request to confirm)")
+    );
     for c in ACTIVE_CHECKS {
         if !keep(c.severity) {
             continue;
@@ -2956,17 +2994,25 @@ pub fn print_catalogue(min: Option<Severity>, color: bool) {
         + UDP_CONDITIONS.len()
         + ACTIVE_CHECKS.len()
         + CERT_CHECKS.len();
-    let tcp_ports: std::collections::BTreeSet<u16> =
-        TCP_EXPOSURES.iter().flat_map(|e| e.ports.iter().copied()).collect();
-    let udp_ports: std::collections::BTreeSet<u16> =
-        UDP_EXPOSURES.iter().flat_map(|e| e.ports.iter().copied()).collect();
-    let cves = SIGS.iter().filter(|s| s.id.starts_with("CVE-")).count()
-        + crate::vuln::cve::CVE_DB.len();
+    let tcp_ports: std::collections::BTreeSet<u16> = TCP_EXPOSURES
+        .iter()
+        .flat_map(|e| e.ports.iter().copied())
+        .collect();
+    let udp_ports: std::collections::BTreeSet<u16> = UDP_EXPOSURES
+        .iter()
+        .flat_map(|e| e.ports.iter().copied())
+        .collect();
+    let cves =
+        SIGS.iter().filter(|s| s.id.starts_with("CVE-")).count() + crate::vuln::cve::CVE_DB.len();
 
     println!();
     println!("{}", p.bold("TOTALS"));
     println!("  {:<34} {}", "version signatures", SIGS.len());
-    println!("  {:<34} {}", "CVE range correlations", crate::vuln::cve::CVE_DB.len());
+    println!(
+        "  {:<34} {}",
+        "CVE range correlations",
+        crate::vuln::cve::CVE_DB.len()
+    );
     println!("  {:<34} {}", "  total carrying a CVE id", cves);
     println!(
         "  {:<34} {} ({} ports)",
@@ -2991,7 +3037,9 @@ pub fn print_catalogue(min: Option<Severity>, color: bool) {
     if min.is_some() {
         println!(
             "  {}",
-            p.dim(&format!("{shown} shown at this severity threshold; drop --min-severity for all {total}"))
+            p.dim(&format!(
+                "{shown} shown at this severity threshold; drop --min-severity for all {total}"
+            ))
         );
     }
 }
@@ -3081,16 +3129,31 @@ mod tests {
     /// put in `ServiceInfo::product`.
     fn emittable_products() -> Vec<String> {
         let mut v: Vec<String> = Vec::new();
-        v.extend(crate::service::APP_MARKERS.iter().map(|(_, label)| label.to_string()));
+        v.extend(
+            crate::service::APP_MARKERS
+                .iter()
+                .map(|(_, label)| label.to_string()),
+        );
         v.extend(crate::service::MAIL_PRODUCTS.iter().map(|p| p.to_string()));
         // Canonical names written by the `Server:` and SSH banner parsers.
-        v.extend(crate::service::SERVER_ALIASES.iter().map(|(_, p)| p.to_string()));
-        v.extend(crate::service::SSH_SOFTWARE.iter().map(|(_, p)| p.to_string()));
+        v.extend(
+            crate::service::SERVER_ALIASES
+                .iter()
+                .map(|(_, p)| p.to_string()),
+        );
+        v.extend(
+            crate::service::SSH_SOFTWARE
+                .iter()
+                .map(|(_, p)| p.to_string()),
+        );
         v.extend(PRODUCTS_FROM_PROBES.iter().map(|p| p.to_string()));
         v
     }
 
-    fn unreachable_in<'a>(products: impl Iterator<Item = &'a str>, sources: &[String]) -> Vec<&'a str> {
+    fn unreachable_in<'a>(
+        products: impl Iterator<Item = &'a str>,
+        sources: &[String],
+    ) -> Vec<&'a str> {
         products
             .filter(|p| {
                 !sources
@@ -3127,8 +3190,10 @@ mod tests {
     fn every_cve_product_is_reachable() {
         let mut sources = emittable_products();
         sources.extend(CVE_BANNER_TOKENS.iter().map(|t| t.to_string()));
-        let unreachable =
-            unreachable_in(crate::vuln::cve::CVE_DB.iter().map(|e| e.match_product), &sources);
+        let unreachable = unreachable_in(
+            crate::vuln::cve::CVE_DB.iter().map(|e| e.match_product),
+            &sources,
+        );
 
         assert!(
             unreachable.is_empty(),
@@ -3160,7 +3225,10 @@ mod tests {
                 if a.id != b.id {
                     continue;
                 }
-                let (pa, pb) = (a.product.to_ascii_lowercase(), b.product.to_ascii_lowercase());
+                let (pa, pb) = (
+                    a.product.to_ascii_lowercase(),
+                    b.product.to_ascii_lowercase(),
+                );
                 if pa.contains(&pb) || pb.contains(&pa) {
                     clashes.push(format!("{} on {:?} and {:?}", a.id, a.product, b.product));
                 }
@@ -3234,7 +3302,10 @@ mod tests {
     }
 
     fn svc(name: &str) -> ServiceInfo {
-        ServiceInfo { name: name.to_string(), ..Default::default() }
+        ServiceInfo {
+            name: name.to_string(),
+            ..Default::default()
+        }
     }
     fn ids(f: &[Finding]) -> Vec<&str> {
         f.iter().map(|x| x.id.as_str()).collect()
@@ -3262,7 +3333,10 @@ mod tests {
         ajp.product = "Apache JServ Protocol".into();
         assert_eq!(confirm_ajp(&ajp), Confirm::Verified);
         let f = assess(8009, &ajp);
-        assert_eq!(find(&f, "KAISEN-AJP-GHOSTCAT").unwrap().severity, Severity::High);
+        assert_eq!(
+            find(&f, "KAISEN-AJP-GHOSTCAT").unwrap().severity,
+            Severity::High
+        );
     }
 
     /// Case 2 of the audit: an Ezviz camera on 9010 (cert O=Ezviz, so detection
@@ -3363,8 +3437,18 @@ mod tests {
     #[test]
     fn dedup_preserves_distinct_ids() {
         let mut f = vec![
-            Finding { id: "A".into(), severity: Severity::Low, title: "a".into(), detail: String::new() },
-            Finding { id: "B".into(), severity: Severity::High, title: "b".into(), detail: String::new() },
+            Finding {
+                id: "A".into(),
+                severity: Severity::Low,
+                title: "a".into(),
+                detail: String::new(),
+            },
+            Finding {
+                id: "B".into(),
+                severity: Severity::High,
+                title: "b".into(),
+                detail: String::new(),
+            },
         ];
         dedup_findings(&mut f);
         assert_eq!(f.len(), 2);

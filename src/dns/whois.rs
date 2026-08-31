@@ -252,13 +252,69 @@ fn kv(p: &Painter, label: &str, value: &str) {
 }
 
 fn summarize_domain(text: &str, p: &Painter) {
-    kv(p, "Domain:", &field(text, &["domain name", "domain"]).unwrap_or_default());
-    kv(p, "Registrar:", &field(text, &["registrar"]).unwrap_or_default());
-    kv(p, "Registered:", &field(text, &["creation date", "created", "registered on", "registration time"]).unwrap_or_default());
-    kv(p, "Updated:", &field(text, &["updated date", "last updated", "modified"]).unwrap_or_default());
-    kv(p, "Expires:", &field(text, &["registry expiry date", "expiry date", "expires on", "paid-till", "expiration time"]).unwrap_or_default());
-    kv(p, "Registrant:", &field(text, &["registrant organization", "registrant", "org", "organization"]).unwrap_or_default());
-    kv(p, "Country:", &field(text, &["registrant country", "country"]).unwrap_or_default());
+    kv(
+        p,
+        "Domain:",
+        &field(text, &["domain name", "domain"]).unwrap_or_default(),
+    );
+    kv(
+        p,
+        "Registrar:",
+        &field(text, &["registrar"]).unwrap_or_default(),
+    );
+    kv(
+        p,
+        "Registered:",
+        &field(
+            text,
+            &[
+                "creation date",
+                "created",
+                "registered on",
+                "registration time",
+            ],
+        )
+        .unwrap_or_default(),
+    );
+    kv(
+        p,
+        "Updated:",
+        &field(text, &["updated date", "last updated", "modified"]).unwrap_or_default(),
+    );
+    kv(
+        p,
+        "Expires:",
+        &field(
+            text,
+            &[
+                "registry expiry date",
+                "expiry date",
+                "expires on",
+                "paid-till",
+                "expiration time",
+            ],
+        )
+        .unwrap_or_default(),
+    );
+    kv(
+        p,
+        "Registrant:",
+        &field(
+            text,
+            &[
+                "registrant organization",
+                "registrant",
+                "org",
+                "organization",
+            ],
+        )
+        .unwrap_or_default(),
+    );
+    kv(
+        p,
+        "Country:",
+        &field(text, &["registrant country", "country"]).unwrap_or_default(),
+    );
 
     let status = fields(text, &["domain status", "status"]);
     if !status.is_empty() {
@@ -268,7 +324,13 @@ fn summarize_domain(text: &str, p: &Painter) {
     if !ns.is_empty() {
         println!("{}", p.bold("Name servers:"));
         for n in ns {
-            println!("  - {}", n.split_whitespace().next().unwrap_or(&n).to_ascii_lowercase());
+            println!(
+                "  - {}",
+                n.split_whitespace()
+                    .next()
+                    .unwrap_or(&n)
+                    .to_ascii_lowercase()
+            );
         }
     }
     let dnssec = field(text, &["dnssec"]).unwrap_or_default();
@@ -276,11 +338,47 @@ fn summarize_domain(text: &str, p: &Painter) {
 }
 
 fn summarize_ip(text: &str, p: &Painter) {
-    kv(p, "Range:", &field(text, &["inetnum", "netrange", "cidr", "inet6num"]).unwrap_or_default());
-    kv(p, "Network:", &field(text, &["netname", "network-name"]).unwrap_or_default());
-    kv(p, "Organization:", &field(text, &["org-name", "orgname", "organisation", "descr", "owner"]).unwrap_or_default());
-    kv(p, "Country:", &field(text, &["country"]).unwrap_or_default());
-    kv(p, "Abuse contact:", &field(text, &["abuse-mailbox", "orgabuseemail", "abusecontactemail"]).unwrap_or_default());
-    kv(p, "Registry:", &field(text, &["source"]).unwrap_or_default());
-    kv(p, "Assigned:", &field(text, &["regdate", "created"]).unwrap_or_default());
+    kv(
+        p,
+        "Range:",
+        &field(text, &["inetnum", "netrange", "cidr", "inet6num"]).unwrap_or_default(),
+    );
+    kv(
+        p,
+        "Network:",
+        &field(text, &["netname", "network-name"]).unwrap_or_default(),
+    );
+    kv(
+        p,
+        "Organization:",
+        &field(
+            text,
+            &["org-name", "orgname", "organisation", "descr", "owner"],
+        )
+        .unwrap_or_default(),
+    );
+    kv(
+        p,
+        "Country:",
+        &field(text, &["country"]).unwrap_or_default(),
+    );
+    kv(
+        p,
+        "Abuse contact:",
+        &field(
+            text,
+            &["abuse-mailbox", "orgabuseemail", "abusecontactemail"],
+        )
+        .unwrap_or_default(),
+    );
+    kv(
+        p,
+        "Registry:",
+        &field(text, &["source"]).unwrap_or_default(),
+    );
+    kv(
+        p,
+        "Assigned:",
+        &field(text, &["regdate", "created"]).unwrap_or_default(),
+    );
 }

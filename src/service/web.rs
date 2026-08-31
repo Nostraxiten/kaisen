@@ -198,7 +198,14 @@ fn parse_response(raw: &[u8]) -> Option<RawResp> {
 
 /// Fetch one path over HTTP or HTTPS, capturing the full response. Reuses
 /// Kaisen's own TCP path (RST-on-close) and from-scratch TLS 1.3 client.
-async fn fetch(ip: IpAddr, port: u16, tls: bool, host: &str, path: &str, dur: Duration) -> Option<RawResp> {
+async fn fetch(
+    ip: IpAddr,
+    port: u16,
+    tls: bool,
+    host: &str,
+    path: &str,
+    dur: Duration,
+) -> Option<RawResp> {
     let addr = SocketAddr::new(ip, port);
     let ms = (dur.as_millis() as u64).max(3000);
     let req = request_line(host, path);
@@ -206,7 +213,9 @@ async fn fetch(ip: IpAddr, port: u16, tls: bool, host: &str, path: &str, dur: Du
     let raw: Vec<u8> = if tls {
         let stream = timeout(dur, TcpStream::connect(addr)).await.ok()?.ok()?;
         crate::util::netutil::reset_on_close(&stream);
-        let mut conn = crate::tls::tls13::handshake(stream, host, &["http/1.1"], ms).await.ok()?;
+        let mut conn = crate::tls::tls13::handshake(stream, host, &["http/1.1"], ms)
+            .await
+            .ok()?;
         conn.write(req.as_bytes(), ms).await.ok()?;
         let mut buf = Vec::new();
         for _ in 0..16 {
@@ -222,7 +231,10 @@ async fn fetch(ip: IpAddr, port: u16, tls: bool, host: &str, path: &str, dur: Du
     } else {
         let mut stream = timeout(dur, TcpStream::connect(addr)).await.ok()?.ok()?;
         crate::util::netutil::reset_on_close(&stream);
-        timeout(dur, stream.write_all(req.as_bytes())).await.ok()?.ok()?;
+        timeout(dur, stream.write_all(req.as_bytes()))
+            .await
+            .ok()?
+            .ok()?;
         read_all(&mut stream, dur).await
     };
 
@@ -251,7 +263,13 @@ async fn read_all(stream: &mut TcpStream, dur: Duration) -> Vec<u8> {
 /// Fingerprint one open web port. Follows up to `MAX_REDIRECTS` same-host
 /// redirects (including an http→https upgrade) so the fingerprint lands on the
 /// page a browser would actually see.
-pub async fn scan(host: &str, ip: IpAddr, port: u16, tls: bool, timeout_ms: u64) -> Option<WebProfile> {
+pub async fn scan(
+    host: &str,
+    ip: IpAddr,
+    port: u16,
+    tls: bool,
+    timeout_ms: u64,
+) -> Option<WebProfile> {
     const MAX_REDIRECTS: usize = 4;
     let dur = Duration::from_millis(timeout_ms.max(3000));
 
@@ -275,7 +293,9 @@ pub async fn scan(host: &str, ip: IpAddr, port: u16, tls: bool, timeout_ms: u64)
         if !(300..400).contains(&resp.status) {
             break;
         }
-        let Some(loc) = resp.location.clone() else { break };
+        let Some(loc) = resp.location.clone() else {
+            break;
+        };
         // Follow like `curl -L`: relative and same-host redirects reuse the
         // connection target; a cross-host redirect (apex → www is the common
         // one) is resolved fresh so the fingerprint lands on the real page.
@@ -341,7 +361,12 @@ pub async fn scan(host: &str, ip: IpAddr, port: u16, tls: bool, timeout_ms: u64)
 /// (host, port, tls, path). A relative target keeps the current host; an
 /// absolute one may point anywhere. Returns `None` for a scheme-less
 /// non-absolute value we shouldn't guess at.
-fn parse_location(loc: &str, cur_host: &str, cur_port: u16, cur_tls: bool) -> Option<(String, u16, bool, String)> {
+fn parse_location(
+    loc: &str,
+    cur_host: &str,
+    cur_port: u16,
+    cur_tls: bool,
+) -> Option<(String, u16, bool, String)> {
     if loc.starts_with('/') {
         return Some((cur_host.to_string(), cur_port, cur_tls, sanitize_path(loc)));
     }
@@ -408,7 +433,10 @@ fn extract_generator(body: &str) -> String {
     let mut idx = 0;
     while let Some(rel) = lower[idx..].find("<meta") {
         let start = idx + rel;
-        let end = lower[start..].find('>').map(|e| start + e).unwrap_or(lower.len());
+        let end = lower[start..]
+            .find('>')
+            .map(|e| start + e)
+            .unwrap_or(lower.len());
         let tag = &lower[start..end];
         if tag.contains("name=\"generator\"") || tag.contains("name='generator'") {
             if let Some(c) = attr_value(&body[start..end], "content") {
@@ -437,7 +465,9 @@ fn attr_value(tag: &str, attr: &str) -> Option<String> {
     } else {
         // unquoted
         let rest = &tag[pos..];
-        let end = rest.find(|c: char| c.is_whitespace() || c == '>').unwrap_or(rest.len());
+        let end = rest
+            .find(|c: char| c.is_whitespace() || c == '>')
+            .unwrap_or(rest.len());
         Some(rest[..end].to_string())
     }
 }
@@ -534,7 +564,13 @@ fn detect_cdn(resp: &RawResp) -> Option<String> {
 /// Insert a technology, or fill in a version on one already present. Kept a
 /// free function (not a closure) so it doesn't hold a standing mutable borrow
 /// of `techs` while the fingerprint pass also reads it.
-fn add_tech(techs: &mut Vec<Tech>, name: &str, version: &str, category: &'static str, confidence: u8) {
+fn add_tech(
+    techs: &mut Vec<Tech>,
+    name: &str,
+    version: &str,
+    category: &'static str,
+    confidence: u8,
+) {
     if let Some(t) = techs.iter_mut().find(|t| t.name.eq_ignore_ascii_case(name)) {
         if t.version.is_empty() && !version.is_empty() {
             t.version = version.to_string();
@@ -585,7 +621,11 @@ fn fingerprint(resp: &RawResp, host: &str) -> Vec<Tech> {
     if resp.header("x-drupal-cache").is_some() || resp.header("x-drupal-dynamic-cache").is_some() {
         add_tech(&mut techs, "Drupal", "", "cms", 100);
     }
-    if resp.header("x-generator").map(|g| g.to_ascii_lowercase().contains("drupal")).unwrap_or(false) {
+    if resp
+        .header("x-generator")
+        .map(|g| g.to_ascii_lowercase().contains("drupal"))
+        .unwrap_or(false)
+    {
         add_tech(&mut techs, "Drupal", "", "cms", 100);
     }
     if let Some(v) = resp.header("x-shopify-stage") {
@@ -619,12 +659,16 @@ fn fingerprint(resp: &RawResp, host: &str) -> Vec<Tech> {
     }
 
     // ── JS library versions from script paths ─────────────────────────────
-    if let Some(v) = find_version(&low, "jquery-", ".js").or_else(|| find_version(&low, "jquery/", "/")) {
+    if let Some(v) =
+        find_version(&low, "jquery-", ".js").or_else(|| find_version(&low, "jquery/", "/"))
+    {
         add_tech(&mut techs, "jQuery", &v, "js-lib", 90);
     } else if low.contains("jquery") {
         add_tech(&mut techs, "jQuery", "", "js-lib", 70);
     }
-    if let Some(v) = find_version(&low, "bootstrap/", "/").or_else(|| find_version(&low, "bootstrap.min.css?ver=", "\"")) {
+    if let Some(v) = find_version(&low, "bootstrap/", "/")
+        .or_else(|| find_version(&low, "bootstrap.min.css?ver=", "\""))
+    {
         add_tech(&mut techs, "Bootstrap", &v, "css", 80);
     } else if low.contains("bootstrap.min.css") || low.contains("bootstrap.css") {
         add_tech(&mut techs, "Bootstrap", "", "css", 70);
@@ -638,7 +682,11 @@ fn fingerprint(resp: &RawResp, host: &str) -> Vec<Tech> {
         if let Some(v) = find_version(&low, "wp-emoji-release.min.js?ver=", "\"")
             .or_else(|| find_version(&low, "/wp-includes/js/", "ver="))
         {
-            if v.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+            if v.chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false)
+            {
                 add_tech(&mut techs, "WordPress", &v, "cms", 100);
             }
         }
@@ -655,7 +703,9 @@ fn fingerprint(resp: &RawResp, host: &str) -> Vec<Tech> {
 /// e.g. `nginx/1.25.3` → `1.25.3`, `Apache/2.4.58 (Ubuntu)` → `2.4.58`.
 fn version_after(hay: &str, needle: &str) -> String {
     let low = hay.to_ascii_lowercase();
-    let Some(pos) = low.find(needle) else { return String::new() };
+    let Some(pos) = low.find(needle) else {
+        return String::new();
+    };
     let after = &hay[pos + needle.len()..];
     // Skip the separators that sit between a product name and its version:
     // "nginx/1.25", "WordPress 6.4", "Joomla! - 5.0", "PHP/8.2".
@@ -722,7 +772,7 @@ const SERVER_PRODUCTS: &[(&str, &str)] = &[
     ("squid", "Squid proxy"),
 ];
 
-const POWERED_BY: &[(&str, &str, &'static str)] = &[
+const POWERED_BY: &[(&str, &str, &str)] = &[
     ("php", "PHP", "language"),
     ("asp.net", "ASP.NET", "framework"),
     ("express", "Express (Node.js)", "framework"),
@@ -734,7 +784,7 @@ const POWERED_BY: &[(&str, &str, &'static str)] = &[
     ("phusion passenger", "Phusion Passenger", "server"),
 ];
 
-const COOKIE_MARKERS: &[(&str, &str, &'static str)] = &[
+const COOKIE_MARKERS: &[(&str, &str, &str)] = &[
     ("phpsessid", "PHP", "language"),
     ("jsessionid", "Java", "language"),
     ("asp.net_sessionid", "ASP.NET", "framework"),
@@ -758,7 +808,7 @@ const COOKIE_MARKERS: &[(&str, &str, &'static str)] = &[
     ("sails.sid", "Sails.js", "framework"),
 ];
 
-const GENERATOR_MARKERS: &[(&str, &str, &'static str)] = &[
+const GENERATOR_MARKERS: &[(&str, &str, &str)] = &[
     ("wordpress", "WordPress", "cms"),
     ("drupal", "Drupal", "cms"),
     ("joomla", "Joomla", "cms"),
@@ -782,7 +832,7 @@ const GENERATOR_MARKERS: &[(&str, &str, &'static str)] = &[
 // Only *distinctive* markers — asset paths, JS globals, unique class/attribute
 // names — never a bare product word, which turns up on marketing pages that
 // merely mention a competitor or customer (GitHub's homepage says "Shopify").
-const BODY_MARKERS: &[(&str, &str, &'static str, u8)] = &[
+const BODY_MARKERS: &[(&str, &str, &str, u8)] = &[
     ("/wp-content/", "WordPress", "cms", 95),
     ("/wp-includes/", "WordPress", "cms", 95),
     ("/sites/default/files", "Drupal", "cms", 90),
@@ -802,13 +852,33 @@ const BODY_MARKERS: &[(&str, &str, &'static str, u8)] = &[
     ("cdn.shopify.com", "Shopify", "cms", 95),
     ("static.parastorage.com", "Wix", "cms", 90),
     ("static1.squarespace.com", "Squarespace", "cms", 90),
-    ("cloudflareinsights.com", "Cloudflare Insights", "analytics", 85),
-    ("google-analytics.com/analytics.js", "Google Analytics", "analytics", 85),
-    ("googletagmanager.com/gtm.js", "Google Tag Manager", "analytics", 85),
+    (
+        "cloudflareinsights.com",
+        "Cloudflare Insights",
+        "analytics",
+        85,
+    ),
+    (
+        "google-analytics.com/analytics.js",
+        "Google Analytics",
+        "analytics",
+        85,
+    ),
+    (
+        "googletagmanager.com/gtm.js",
+        "Google Tag Manager",
+        "analytics",
+        85,
+    ),
     ("static.hotjar.com", "Hotjar", "analytics", 80),
     ("gstatic.com/recaptcha", "Google reCAPTCHA", "security", 85),
     ("hcaptcha.com/1/api.js", "hCaptcha", "security", 85),
-    ("challenges.cloudflare.com/turnstile", "Cloudflare Turnstile", "security", 85),
+    (
+        "challenges.cloudflare.com/turnstile",
+        "Cloudflare Turnstile",
+        "security",
+        85,
+    ),
     ("/phpmyadmin/", "phpMyAdmin", "app", 85),
     ("pma_password", "phpMyAdmin", "app", 90),
     ("swagger-ui", "Swagger UI", "app", 85),
@@ -839,8 +909,16 @@ fn base64_encodebytes(data: &[u8]) -> String {
         let n = (b0 << 16) | (b1 << 8) | b2;
         raw.push(T[((n >> 18) & 63) as usize] as char);
         raw.push(T[((n >> 12) & 63) as usize] as char);
-        raw.push(if chunk.len() > 1 { T[((n >> 6) & 63) as usize] as char } else { '=' });
-        raw.push(if chunk.len() > 2 { T[(n & 63) as usize] as char } else { '=' });
+        raw.push(if chunk.len() > 1 {
+            T[((n >> 6) & 63) as usize] as char
+        } else {
+            '='
+        });
+        raw.push(if chunk.len() > 2 {
+            T[(n & 63) as usize] as char
+        } else {
+            '='
+        });
     }
     // Python's encodebytes wraps at 76 chars and appends a trailing newline.
     let mut out = String::with_capacity(raw.len() + raw.len() / 76 + 1);
@@ -860,7 +938,12 @@ fn murmur3_x86_32(data: &[u8], seed: u32) -> u32 {
     let mut h = seed;
     let nblocks = data.len() / 4;
     for i in 0..nblocks {
-        let k = u32::from_le_bytes([data[i * 4], data[i * 4 + 1], data[i * 4 + 2], data[i * 4 + 3]]);
+        let k = u32::from_le_bytes([
+            data[i * 4],
+            data[i * 4 + 1],
+            data[i * 4 + 2],
+            data[i * 4 + 3],
+        ]);
         let mut k = k.wrapping_mul(C1);
         k = k.rotate_left(15);
         k = k.wrapping_mul(C2);
@@ -907,8 +990,14 @@ mod tests {
 
     #[test]
     fn find_version_pulls_dotted_runs_only() {
-        assert_eq!(find_version("/js/jquery-3.6.0.min.js", "jquery-", ".min"), Some("3.6.0".into()));
-        assert_eq!(find_version("ng-version=\"17.0.1\"", "ng-version=\"", "\""), Some("17.0.1".into()));
+        assert_eq!(
+            find_version("/js/jquery-3.6.0.min.js", "jquery-", ".min"),
+            Some("3.6.0".into())
+        );
+        assert_eq!(
+            find_version("ng-version=\"17.0.1\"", "ng-version=\"", "\""),
+            Some("17.0.1".into())
+        );
         // A single integer is not a version.
         assert_eq!(find_version("bootstrap-5/", "bootstrap-", "/"), None);
     }
@@ -965,9 +1054,17 @@ mod tests {
         // Relative: same host/port/scheme, new path.
         assert_eq!(
             parse_location("/en/home", "example.com", 8080, false),
-            Some(("example.com".to_string(), 8080, false, "/en/home".to_string()))
+            Some((
+                "example.com".to_string(),
+                8080,
+                false,
+                "/en/home".to_string()
+            ))
         );
         // Scheme-less junk: don't guess.
-        assert_eq!(parse_location("mailto:x@y.z", "example.com", 80, false), None);
+        assert_eq!(
+            parse_location("mailto:x@y.z", "example.com", 80, false),
+            None
+        );
     }
 }

@@ -15,28 +15,194 @@ use crate::util::output::Painter;
 
 /// Common subdomain labels to probe.
 const SUBDOMAINS: &[&str] = &[
-    "www", "mail", "smtp", "pop", "pop3", "imap", "webmail", "ns1", "ns2", "ns3",
-    "ns4", "dns", "dns1", "dns2", "mx", "mx1", "mx2", "ftp", "sftp", "ssh", "vpn",
-    "remote", "gateway", "gw", "router", "portal", "admin", "administrator",
-    "cpanel", "whm", "webdisk", "autodiscover", "autoconfig", "dev", "development",
-    "staging", "stage", "test", "testing", "qa", "uat", "demo", "sandbox", "beta",
-    "alpha", "preview", "api", "api1", "api2", "apis", "app", "apps", "mobile", "m",
-    "wap", "cdn", "cdn1", "cdn2", "static", "assets", "img", "images", "media",
-    "video", "files", "download", "downloads", "upload", "uploads", "docs", "wiki",
-    "blog", "news", "forum", "forums", "community", "support", "help", "helpdesk",
-    "status", "monitor", "monitoring", "grafana", "kibana", "prometheus", "jenkins",
-    "ci", "cd", "git", "gitlab", "svn", "jira", "confluence", "nexus", "registry",
-    "docker", "k8s", "kube", "rancher", "db", "database", "sql", "mysql", "postgres",
-    "mongo", "redis", "cache", "search", "elastic", "es", "ldap", "ad", "auth", "sso",
-    "login", "id", "identity", "accounts", "account", "billing", "pay", "payment",
-    "payments", "shop", "store", "cart", "checkout", "secure", "ssl", "vault",
-    "proxy", "lb", "loadbalancer", "edge", "origin", "internal", "intranet", "extranet",
-    "partner", "partners", "client", "clients", "customer", "crm", "erp", "hr",
-    "mail2", "email", "exchange", "owa", "lyncdiscover", "sip", "voip", "pbx",
-    "conf", "meet", "chat", "im", "xmpp", "irc", "old", "new", "backup", "bak",
-    "archive", "legacy", "temp", "tmp", "web", "web1", "web2", "server", "srv",
-    "host", "cloud", "s3", "storage", "data", "analytics", "stats", "metrics",
-    "dashboard", "panel", "console", "manage", "management", "office", "corp",
+    "www",
+    "mail",
+    "smtp",
+    "pop",
+    "pop3",
+    "imap",
+    "webmail",
+    "ns1",
+    "ns2",
+    "ns3",
+    "ns4",
+    "dns",
+    "dns1",
+    "dns2",
+    "mx",
+    "mx1",
+    "mx2",
+    "ftp",
+    "sftp",
+    "ssh",
+    "vpn",
+    "remote",
+    "gateway",
+    "gw",
+    "router",
+    "portal",
+    "admin",
+    "administrator",
+    "cpanel",
+    "whm",
+    "webdisk",
+    "autodiscover",
+    "autoconfig",
+    "dev",
+    "development",
+    "staging",
+    "stage",
+    "test",
+    "testing",
+    "qa",
+    "uat",
+    "demo",
+    "sandbox",
+    "beta",
+    "alpha",
+    "preview",
+    "api",
+    "api1",
+    "api2",
+    "apis",
+    "app",
+    "apps",
+    "mobile",
+    "m",
+    "wap",
+    "cdn",
+    "cdn1",
+    "cdn2",
+    "static",
+    "assets",
+    "img",
+    "images",
+    "media",
+    "video",
+    "files",
+    "download",
+    "downloads",
+    "upload",
+    "uploads",
+    "docs",
+    "wiki",
+    "blog",
+    "news",
+    "forum",
+    "forums",
+    "community",
+    "support",
+    "help",
+    "helpdesk",
+    "status",
+    "monitor",
+    "monitoring",
+    "grafana",
+    "kibana",
+    "prometheus",
+    "jenkins",
+    "ci",
+    "cd",
+    "git",
+    "gitlab",
+    "svn",
+    "jira",
+    "confluence",
+    "nexus",
+    "registry",
+    "docker",
+    "k8s",
+    "kube",
+    "rancher",
+    "db",
+    "database",
+    "sql",
+    "mysql",
+    "postgres",
+    "mongo",
+    "redis",
+    "cache",
+    "search",
+    "elastic",
+    "es",
+    "ldap",
+    "ad",
+    "auth",
+    "sso",
+    "login",
+    "id",
+    "identity",
+    "accounts",
+    "account",
+    "billing",
+    "pay",
+    "payment",
+    "payments",
+    "shop",
+    "store",
+    "cart",
+    "checkout",
+    "secure",
+    "ssl",
+    "vault",
+    "proxy",
+    "lb",
+    "loadbalancer",
+    "edge",
+    "origin",
+    "internal",
+    "intranet",
+    "extranet",
+    "partner",
+    "partners",
+    "client",
+    "clients",
+    "customer",
+    "crm",
+    "erp",
+    "hr",
+    "mail2",
+    "email",
+    "exchange",
+    "owa",
+    "lyncdiscover",
+    "sip",
+    "voip",
+    "pbx",
+    "conf",
+    "meet",
+    "chat",
+    "im",
+    "xmpp",
+    "irc",
+    "old",
+    "new",
+    "backup",
+    "bak",
+    "archive",
+    "legacy",
+    "temp",
+    "tmp",
+    "web",
+    "web1",
+    "web2",
+    "server",
+    "srv",
+    "host",
+    "cloud",
+    "s3",
+    "storage",
+    "data",
+    "analytics",
+    "stats",
+    "metrics",
+    "dashboard",
+    "panel",
+    "console",
+    "manage",
+    "management",
+    "office",
+    "corp",
 ];
 
 /// Read an optional cap from an environment variable. Accepts a positive
@@ -146,9 +312,16 @@ pub async fn run(
     // 1) Apex.
     let apex = resolve_a(server, domain, timeout_ms).await;
     if apex.is_empty() {
-        println!("{}", p.yellow("Apex has no A record (or could not resolve)."));
+        println!(
+            "{}",
+            p.yellow("Apex has no A record (or could not resolve).")
+        );
     } else {
-        let ips = apex.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(", ");
+        let ips = apex
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
         println!("{:<12}{} -> {}", p.bold("Apex:"), domain, ips);
     }
 
@@ -156,17 +329,26 @@ pub async fn run(
     let rnd = format!("kaisen-{}-wc.{}", std::process::id(), domain);
     let wildcard = resolve_a(server, &rnd, timeout_ms).await;
     if !wildcard.is_empty() {
-        let ips = wildcard.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(", ");
+        let ips = wildcard
+            .iter()
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
         println!(
             "{} {}",
             p.yellow("[wildcard]"),
-            p.dim(&format!("*.{domain} resolves to {ips} — results matching only these are filtered"))
+            p.dim(&format!(
+                "*.{domain} resolves to {ips} — results matching only these are filtered"
+            ))
         );
     }
 
     // 3) Brute-force subdomains.
     println!();
-    println!("{}", p.bold(&format!("Probing {} subdomains...", SUBDOMAINS.len())));
+    println!(
+        "{}",
+        p.bold(&format!("Probing {} subdomains...", SUBDOMAINS.len()))
+    );
 
     let found: Vec<(String, BTreeSet<Ipv4Addr>)> = stream::iter(SUBDOMAINS.iter())
         .map(|sub| {
@@ -195,11 +377,18 @@ pub async fn run(
     subs.sort_by(|a, b| a.0.cmp(&b.0));
 
     if subs.is_empty() {
-        println!("{}", p.yellow("No subdomains discovered from the built-in list."));
+        println!(
+            "{}",
+            p.yellow("No subdomains discovered from the built-in list.")
+        );
     } else {
         println!("{}", p.bold(&format!("Subdomains found ({}):", subs.len())));
         for (fqdn, ips) in &subs {
-            let ipss = ips.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(", ");
+            let ipss = ips
+                .iter()
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
             println!("  {:<34} -> {}", p.green(fqdn), ipss);
         }
     }
@@ -234,7 +423,7 @@ pub async fn run(
             .flat_map(|s| (1u16..=254).map(move |h| Ipv4Addr::new(s[0], s[1], s[2], h as u8)))
             .collect();
 
-        let neighbours: Vec<(Ipv4Addr, String)> = stream::iter(targets.into_iter())
+        let neighbours: Vec<(Ipv4Addr, String)> = stream::iter(targets)
             .map(|ip| async move { (ip, reverse_ptr(server, ip, timeout_ms).await) })
             .buffer_unordered(conc)
             .filter_map(|(ip, name)| async move { name.map(|n| (ip, n)) })
@@ -268,7 +457,10 @@ pub async fn run(
             }
 
             if related.is_empty() && other.is_empty() {
-                println!("{}", p.dim("  (only generic CDN/cloud PTRs in range — see summary below)"));
+                println!(
+                    "{}",
+                    p.dim("  (only generic CDN/cloud PTRs in range — see summary below)")
+                );
             }
             for (ip, name) in &related {
                 println!("  {:<16} {}", ip, p.cyan(name));
@@ -296,7 +488,9 @@ pub async fn run(
                     .join(", ");
                 println!(
                     "{}",
-                    p.dim(&format!("  [hidden] {summary} — generic CDN/cloud auto-PTRs"))
+                    p.dim(&format!(
+                        "  [hidden] {summary} — generic CDN/cloud auto-PTRs"
+                    ))
                 );
             }
         }
@@ -305,7 +499,9 @@ pub async fn run(
     println!();
     println!(
         "{}",
-        p.dim("Note: only passive DNS is used. Discovery is limited to the built-in wordlist and \
-               PTR coverage of the neighbouring ranges.")
+        p.dim(
+            "Note: only passive DNS is used. Discovery is limited to the built-in wordlist and \
+               PTR coverage of the neighbouring ranges."
+        )
     );
 }

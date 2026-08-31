@@ -1626,7 +1626,11 @@ mod tests {
         }
     }
     fn openssh(v: &str) -> ServiceInfo {
-        ServiceInfo { product: "OpenSSH".into(), version: v.into(), ..Default::default() }
+        ServiceInfo {
+            product: "OpenSSH".into(),
+            version: v.into(),
+            ..Default::default()
+        }
     }
     fn ids(f: &[Finding]) -> Vec<String> {
         f.iter().map(|x| x.id.clone()).collect()
@@ -1642,7 +1646,10 @@ mod tests {
     #[test]
     fn version_ignores_non_numeric_tails() {
         assert_eq!(Version::parse("8.2p1"), Version::parse("8.2"));
-        assert_eq!(Version::parse("5.3.0 build 201719"), Version::parse("5.3.0"));
+        assert_eq!(
+            Version::parse("5.3.0 build 201719"),
+            Version::parse("5.3.0")
+        );
         assert_eq!(Version::parse("1.6.18-ubuntu3"), Version::parse("1.6.18"));
     }
 
@@ -1700,7 +1707,11 @@ mod tests {
     fn entries_carry_their_provenance() {
         for e in CVE_DB {
             assert!(e.cpe.starts_with("cpe:2.3:"), "{} has no CPE 2.3 id", e.cve);
-            assert!(e.reference.contains(e.cve), "{}'s reference points elsewhere", e.cve);
+            assert!(
+                e.reference.contains(e.cve),
+                "{}'s reference points elsewhere",
+                e.cve
+            );
         }
     }
 
@@ -1759,12 +1770,20 @@ mod tests {
     /// header, which is a banner match rather than a product match.
     #[test]
     fn openssl_version_is_read_from_the_server_header() {
-        let old = ids(&correlate(&http("Apache", "2.4.7", "Ubuntu) OpenSSL/1.0.1f")));
+        let old = ids(&correlate(&http(
+            "Apache",
+            "2.4.7",
+            "Ubuntu) OpenSSL/1.0.1f",
+        )));
         assert!(old.contains(&"CVE-2014-0160".to_string()));
         assert!(old.contains(&"CVE-2014-0224".to_string()));
         // A current OpenSSL is outside every band, even though the httpd in
         // front of it is not.
-        let new = ids(&correlate(&http("Apache", "2.4.62", "Debian) OpenSSL/3.0.15")));
+        let new = ids(&correlate(&http(
+            "Apache",
+            "2.4.62",
+            "Debian) OpenSSL/3.0.15",
+        )));
         assert!(!new.iter().any(|id| id.starts_with("CVE-2014-0")));
     }
 
@@ -1836,7 +1855,11 @@ mod tests {
             ("Apache-Coyote", "1.1", ""),
             ("Apache Tomcat", "9.0.85", ""),
             // A current httpd that names three other products in its header.
-            ("Apache", "2.4.62", "Debian) OpenSSL/3.0.15 PHP/8.2.7 GnuTLS/3.7.9"),
+            (
+                "Apache",
+                "2.4.62",
+                "Debian) OpenSSL/3.0.15 PHP/8.2.7 GnuTLS/3.7.9",
+            ),
             ("nginx", "1.24.0", ""),
             // phpMyAdmin contains "php"; the page is served by a current stack.
             ("phpMyAdmin", "", "title \"phpMyAdmin\""),
@@ -1888,7 +1911,7 @@ mod tests {
         let mut s = upnp("1.6.17");
         s.product = "Linux".into();
         s.version = "4.1.52".into(); // the device OS, not libupnp
-        // Still flagged, because the banner carries the real libupnp version.
+                                     // Still flagged, because the banner carries the real libupnp version.
         assert!(ids(&correlate(&s)).contains(&"CVE-2012-5958".to_string()));
     }
 }

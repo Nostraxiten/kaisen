@@ -32,7 +32,12 @@ pub async fn probe(ip: IpAddr) -> Probes {
         }
         None => (None, None),
     };
-    Probes { ttl, ttl_family, ttl_hops, snmp_os }
+    Probes {
+        ttl,
+        ttl_family,
+        ttl_hops,
+        snmp_os,
+    }
 }
 
 /// Map an observed TTL to the most likely initial TTL and OS family.
@@ -55,8 +60,8 @@ pub fn ttl_family(ttl: u8) -> (&'static str, u8) {
 pub async fn ttl_via_ping(ip: IpAddr) -> Option<u8> {
     let ip_s = ip.to_string();
     let arg_sets: [&[&str]; 3] = [
-        &["-c", "1", "-W", "1"],  // Linux / Termux
-        &["-c", "1", "-t", "1"],  // macOS / BSD
+        &["-c", "1", "-W", "1"],    // Linux / Termux
+        &["-c", "1", "-t", "1"],    // macOS / BSD
         &["-n", "1", "-w", "1000"], // Windows
     ];
     // Bounding process execution: Android/Termux aggressively kills apps
@@ -291,7 +296,9 @@ fn parse_snmp_sysdescr(resp: &[u8]) -> Option<String> {
         v.extend_from_slice(SYSDESCR_OID);
         v
     };
-    let pos = resp.windows(needle.len()).position(|w| w == needle.as_slice())?;
+    let pos = resp
+        .windows(needle.len())
+        .position(|w| w == needle.as_slice())?;
     let mut i = pos + needle.len();
     if i + 2 > resp.len() {
         return None;
@@ -302,7 +309,9 @@ fn parse_snmp_sysdescr(resp: &[u8]) -> Option<String> {
     if tag != 0x04 || i + len > resp.len() {
         return None;
     }
-    let s = String::from_utf8_lossy(&resp[i..i + len]).trim().to_string();
+    let s = String::from_utf8_lossy(&resp[i..i + len])
+        .trim()
+        .to_string();
     if s.is_empty() {
         None
     } else {

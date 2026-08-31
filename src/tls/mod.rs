@@ -21,16 +21,16 @@ use tokio::time::timeout;
 
 #[derive(Debug, Clone, Default)]
 pub struct TlsInfo {
-    pub version: String,     // "TLS 1.2", "SSL 3.0", ...
-    pub cipher: String,      // negotiated cipher suite name
-    pub alpn: String,        // "h2", "http/1.1", ...
-    pub subject_cn: String,  // certificate subject CN
-    pub subject_o: String,   // certificate subject Organization (O), e.g. "Ezviz"
-    pub issuer_cn: String,   // certificate issuer CN
-    pub not_after: String,   // "2026-01-31"
+    pub version: String,    // "TLS 1.2", "SSL 3.0", ...
+    pub cipher: String,     // negotiated cipher suite name
+    pub alpn: String,       // "h2", "http/1.1", ...
+    pub subject_cn: String, // certificate subject CN
+    pub subject_o: String,  // certificate subject Organization (O), e.g. "Ezviz"
+    pub issuer_cn: String,  // certificate issuer CN
+    pub not_after: String,  // "2026-01-31"
     pub expired: bool,
     pub self_signed: bool,
-    pub sans: Vec<String>,   // subject alternative DNS names (capped)
+    pub sans: Vec<String>, // subject alternative DNS names (capped)
 }
 
 impl TlsInfo {
@@ -140,7 +140,11 @@ pub async fn probe_stream(
 /// Full probe against an address: try a TLS 1.2-style hello first (it keeps the
 /// certificate in the clear), and only if the server refuses outright retry
 /// offering TLS 1.3. Modern 1.3-only servers answer the second attempt.
-pub async fn probe(addr: std::net::SocketAddr, host: Option<&str>, dur: Duration) -> Option<TlsInfo> {
+pub async fn probe(
+    addr: std::net::SocketAddr,
+    host: Option<&str>,
+    dur: Duration,
+) -> Option<TlsInfo> {
     if let Ok(Ok(mut s)) = timeout(dur, TcpStream::connect(addr)).await {
         crate::util::netutil::reset_on_close(&s);
         if let Some(i) = probe_stream(&mut s, host, dur, false).await {
@@ -163,9 +167,8 @@ pub async fn probe(addr: std::net::SocketAddr, host: Option<&str>, dur: Duration
 /// rather than silently failing the handshake).
 const CIPHERS: &[u16] = &[
     0x1302, 0x1303, 0x1301, // TLS 1.3
-    0xc02c, 0xc030, 0xc02b, 0xc02f, 0xcca9, 0xcca8, 0xccaa,
-    0xc024, 0xc028, 0xc023, 0xc027, 0xc00a, 0xc014, 0xc009, 0xc013,
-    0x009d, 0x009c, 0x003d, 0x003c, 0x0035, 0x002f, 0x000a, 0x0005, 0x0004,
+    0xc02c, 0xc030, 0xc02b, 0xc02f, 0xcca9, 0xcca8, 0xccaa, 0xc024, 0xc028, 0xc023, 0xc027, 0xc00a,
+    0xc014, 0xc009, 0xc013, 0x009d, 0x009c, 0x003d, 0x003c, 0x0035, 0x002f, 0x000a, 0x0005, 0x0004,
 ];
 
 fn rand_bytes(n: usize) -> Vec<u8> {
@@ -294,7 +297,8 @@ fn is_dns_name(h: &str) -> bool {
     !h.is_empty()
         && h.parse::<std::net::IpAddr>().is_err()
         && h.contains('.')
-        && h.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+        && h.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
 }
 
 // ── Record / handshake framing ──────────────────────────────────────────────
@@ -326,7 +330,8 @@ fn split_handshake(buf: &[u8]) -> Vec<(u8, Vec<u8>)> {
     let mut i = 0usize;
     while i + 4 <= buf.len() {
         let mtype = buf[i];
-        let len = ((buf[i + 1] as usize) << 16) | ((buf[i + 2] as usize) << 8) | buf[i + 3] as usize;
+        let len =
+            ((buf[i + 1] as usize) << 16) | ((buf[i + 2] as usize) << 8) | buf[i + 3] as usize;
         if i + 4 + len > buf.len() {
             break;
         }
@@ -440,7 +445,8 @@ fn parse_certificates(body: &[u8], info: &mut TlsInfo) {
     if i + 3 > end {
         return;
     }
-    let cert_len = ((body[i] as usize) << 16) | ((body[i + 1] as usize) << 8) | body[i + 2] as usize;
+    let cert_len =
+        ((body[i] as usize) << 16) | ((body[i + 1] as usize) << 8) | body[i + 2] as usize;
     i += 3;
     if i + cert_len > end {
         return;
@@ -456,7 +462,7 @@ fn parse_certificates(body: &[u8], info: &mut TlsInfo) {
     if let Some(last) = cns.last() {
         info.subject_cn = last.clone();
     }
-    info.self_signed = cns.len() >= 1 && info.issuer_cn == info.subject_cn;
+    info.self_signed = !cns.is_empty() && info.issuer_cn == info.subject_cn;
 
     // The subject Organization (O) names appliances that leave the CN generic
     // — an Ezviz camera ships CN=Device but O=Ezviz. Same encounter-order rule
@@ -565,10 +571,7 @@ pub fn der_organizations(cert: &[u8]) -> Vec<String> {
 pub fn der_dns_sans(cert: &[u8]) -> Vec<String> {
     const SAN_OID: &[u8] = &[0x06, 0x03, 0x55, 0x1d, 0x11];
     let mut out: Vec<String> = Vec::new();
-    let Some(pos) = cert
-        .windows(SAN_OID.len())
-        .position(|w| w == SAN_OID)
-    else {
+    let Some(pos) = cert.windows(SAN_OID.len()).position(|w| w == SAN_OID) else {
         return out;
     };
     let mut i = pos + SAN_OID.len();
@@ -582,7 +585,9 @@ pub fn der_dns_sans(cert: &[u8]) -> Vec<String> {
     if cert.get(i) != Some(&0x04) {
         return out;
     }
-    let Some((s, l)) = der_tlv(cert, i) else { return out };
+    let Some((s, l)) = der_tlv(cert, i) else {
+        return out;
+    };
     let inner = match cert.get(s..s + l) {
         Some(v) => v,
         None => return out,
@@ -590,18 +595,24 @@ pub fn der_dns_sans(cert: &[u8]) -> Vec<String> {
     if inner.first() != Some(&0x30) {
         return out;
     }
-    let Some((gs, gl)) = der_tlv(inner, 0) else { return out };
+    let Some((gs, gl)) = der_tlv(inner, 0) else {
+        return out;
+    };
     let end = (gs + gl).min(inner.len());
     let mut j = gs;
     while j + 2 <= end && out.len() < 8 {
         let tag = inner[j];
-        let Some((vs, vl)) = der_tlv(inner, j) else { break };
+        let Some((vs, vl)) = der_tlv(inner, j) else {
+            break;
+        };
         if vs + vl > inner.len() {
             break;
         }
         if tag == 0x82 {
             // [2] dNSName, an implicitly-tagged IA5String.
-            let name = String::from_utf8_lossy(&inner[vs..vs + vl]).trim().to_string();
+            let name = String::from_utf8_lossy(&inner[vs..vs + vl])
+                .trim()
+                .to_string();
             if !name.is_empty() && !out.contains(&name) {
                 out.push(name);
             }
@@ -620,7 +631,9 @@ pub fn der_dns_sans(cert: &[u8]) -> Vec<String> {
 pub fn der_not_after(cert: &[u8]) -> Option<(String, bool)> {
     let mut i = 0usize;
     while i + 4 < cert.len() {
-        if cert[i] == 0x30 && matches!(cert[i + 2], 0x17 | 0x18) && matches!(cert[i + 3], 0x0d | 0x0f)
+        if cert[i] == 0x30
+            && matches!(cert[i + 2], 0x17 | 0x18)
+            && matches!(cert[i + 3], 0x0d | 0x0f)
         {
             let (first_start, first_len) = der_tlv(cert, i + 2)?;
             let second = first_start + first_len;

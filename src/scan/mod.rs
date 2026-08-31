@@ -3,10 +3,10 @@
 //! de servicio/versión/SO/vuln, y renderizado de resultados en formato
 //! normal / JSON / grepable.
 
+pub mod mail;
 pub mod neigh;
 pub mod osfp;
 pub mod udp;
-pub mod mail;
 
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{Duration, Instant};
@@ -16,9 +16,9 @@ use tokio::net::TcpStream;
 use tokio::time::timeout;
 
 use crate::cli::{IpVersion, Options, OutputFormat, ScanKind};
-use crate::util::output::{json_escape, Painter};
 use crate::ports::service_name;
 use crate::service::{self, ServiceInfo};
+use crate::util::output::{json_escape, Painter};
 use crate::vuln::{self, Finding, Severity};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,7 +141,11 @@ async fn expand(
             if count > 65536 {
                 return Err("CIDR range too large (max /16)".into());
             }
-            let mask = if host_bits == 32 { 0 } else { base_u & !((count as u32).wrapping_sub(1)) };
+            let mask = if host_bits == 32 {
+                0
+            } else {
+                base_u & !((count as u32).wrapping_sub(1))
+            };
             let net = if host_bits == 32 { 0 } else { mask };
             let start = if host_bits == 32 { base_u } else { net };
             let mut out = Vec::new();
@@ -315,8 +319,12 @@ impl Pacer {
     /// most-informed lower bound and never bounce back up.
     fn observe(&self, latency: Duration) {
         let rtt = latency.as_millis() as u64;
-        let target = rtt.saturating_mul(5).saturating_add(80).clamp(self.floor_ms, self.ceiling_ms);
-        self.eff_ms.fetch_min(target, std::sync::atomic::Ordering::Relaxed);
+        let target = rtt
+            .saturating_mul(5)
+            .saturating_add(80)
+            .clamp(self.floor_ms, self.ceiling_ms);
+        self.eff_ms
+            .fetch_min(target, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -365,7 +373,7 @@ async fn firewall_precheck(ip: IpAddr, timeout_ms: u64) -> FirewallProbe {
     let sampled = fw_random_ports(seed);
     // No retries: for a fast pre-check one look is enough, and a real open
     // port answers on the first connect anyway.
-    let states = stream::iter(sampled.clone().into_iter())
+    let states = stream::iter(sampled.clone())
         .map(|port| async move { probe_port(ip, port, timeout_ms, 0).await.0 })
         .buffer_unordered(FW_SAMPLE)
         .collect::<Vec<State>>()
@@ -377,11 +385,36 @@ async fn firewall_precheck(ip: IpAddr, timeout_ms: u64) -> FirewallProbe {
 /// Ports that carry HTTP even without a service label, so `-WW` still probes
 /// them on a plain-ish result. The `true` ones are HTTPS by default.
 const WEB_PORTS: &[(u16, bool)] = &[
-    (80, false), (81, false), (443, true), (591, false), (2052, false), (2082, false),
-    (2086, false), (2095, false), (3000, false), (5000, false), (7001, false), (8000, false),
-    (8008, false), (8080, false), (8081, false), (8088, false), (8090, false), (8443, true),
-    (8444, true), (8888, false), (9000, false), (9090, false), (9443, true), (10000, false),
-    (4443, true), (7443, true), (2053, true), (2083, true), (2087, true), (2096, true),
+    (80, false),
+    (81, false),
+    (443, true),
+    (591, false),
+    (2052, false),
+    (2082, false),
+    (2086, false),
+    (2095, false),
+    (3000, false),
+    (5000, false),
+    (7001, false),
+    (8000, false),
+    (8008, false),
+    (8080, false),
+    (8081, false),
+    (8088, false),
+    (8090, false),
+    (8443, true),
+    (8444, true),
+    (8888, false),
+    (9000, false),
+    (9090, false),
+    (9443, true),
+    (10000, false),
+    (4443, true),
+    (7443, true),
+    (2053, true),
+    (2083, true),
+    (2087, true),
+    (2096, true),
 ];
 
 /// Decide whether an open TCP port is a web endpoint worth fingerprinting, and
@@ -393,7 +426,9 @@ fn is_web_port(r: &PortReport) -> Option<bool> {
         let tls = !svc.tls_version.is_empty();
         if name.contains("http") {
             // Trust the label: https / http-alt / https-alt / http-proxy…
-            return Some(tls || name.contains("https") || WEB_PORTS.iter().any(|(p, t)| *p == r.port && *t));
+            return Some(
+                tls || name.contains("https") || WEB_PORTS.iter().any(|(p, t)| *p == r.port && *t),
+            );
         }
         // A TLS port that didn't identify as HTTP but sits on a known web port
         // (e.g. an app console on 8443) is still worth a look.
@@ -408,7 +443,10 @@ fn is_web_port(r: &PortReport) -> Option<bool> {
         }
     }
     // No useful service label: fall back to the well-known web ports.
-    WEB_PORTS.iter().find(|(p, _)| *p == r.port).map(|(_, t)| *t)
+    WEB_PORTS
+        .iter()
+        .find(|(p, _)| *p == r.port)
+        .map(|(_, t)| *t)
 }
 
 /// Maximum number of ports doing active service detection at the same time
@@ -651,7 +689,11 @@ impl Progress {
         // stay clean, and `start_every` skips it for non-terminals and for
         // trivially short phases (its own total>1 + first-second-sleep guard),
         // so a fast scan still prints nothing.
-        let secs = if opts.progress_secs > 0 { opts.progress_secs } else { 1 };
+        let secs = if opts.progress_secs > 0 {
+            opts.progress_secs
+        } else {
+            1
+        };
         Progress::start_every(label, total, secs)
     }
 
@@ -665,9 +707,8 @@ impl Progress {
 
         // Nothing to report, not asked for, or nobody watching: a progress bar
         // in a log file or a CI transcript is just noise.
-        let wanted = every_secs > 0
-            && total > 1
-            && std::io::IsTerminal::is_terminal(&std::io::stderr());
+        let wanted =
+            every_secs > 0 && total > 1 && std::io::IsTerminal::is_terminal(&std::io::stderr());
         if !wanted {
             return Progress { done, task: None };
         }
@@ -684,20 +725,25 @@ impl Progress {
                     break;
                 }
                 let elapsed = start.elapsed().as_secs_f64();
-                let rate = if elapsed > 0.0 { n as f64 / elapsed } else { 0.0 };
+                let rate = if elapsed > 0.0 {
+                    n as f64 / elapsed
+                } else {
+                    0.0
+                };
                 let pct = n as f64 * 100.0 / total as f64;
                 let eta = if rate > 0.0 {
                     fmt_duration((total - n) as f64 / rate)
                 } else {
                     "?".to_string()
                 };
-                eprint!(
-                    "\r\x1b[2K{label}: {n}/{total} ({pct:.0}%) at {rate:.0}/s, ETA {eta}"
-                );
+                eprint!("\r\x1b[2K{label}: {n}/{total} ({pct:.0}%) at {rate:.0}/s, ETA {eta}");
                 let _ = std::io::Write::flush(&mut std::io::stderr());
             }
         });
-        Progress { done, task: Some(task) }
+        Progress {
+            done,
+            task: Some(task),
+        }
     }
 
     /// A handle for the scan loop to bump once per finished unit of work.
@@ -750,9 +796,7 @@ async fn quick_alive(ip: IpAddr) -> bool {
     // Probe all discovery ports in parallel: first non-Filtered answer wins.
     let tcp = async {
         let states: Vec<State> = stream::iter(DISCOVERY_PORTS)
-            .map(|port| async move {
-                probe_port(ip, port, DISCOVERY_TCP_TIMEOUT_MS, 0).await.0
-            })
+            .map(|port| async move { probe_port(ip, port, DISCOVERY_TCP_TIMEOUT_MS, 0).await.0 })
             .buffer_unordered(DISCOVERY_PORTS.len())
             .collect()
             .await;
@@ -909,23 +953,22 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
     // one permit every (1000 / max_rate) ms, capping how fast new TCP SYNs are
     // sent. This prevents zombie conntrack entries from accumulating in home
     // routers faster than they can expire (router's syn_sent timeout ≈ 60-120s).
-    let rate_sem: Option<std::sync::Arc<tokio::sync::Semaphore>> =
-        if opts.timing.max_rate > 0 {
-            let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
-            let sem2 = sem.clone();
-            let rate = opts.timing.max_rate;
-            let total = ports.len();
-            tokio::spawn(async move {
-                let interval_ms = (1000u64).div_ceil(rate as u64);
-                for _ in 0..total {
-                    tokio::time::sleep(Duration::from_millis(interval_ms)).await;
-                    sem2.add_permits(1);
-                }
-            });
-            Some(sem)
-        } else {
-            None
-        };
+    let rate_sem: Option<std::sync::Arc<tokio::sync::Semaphore>> = if opts.timing.max_rate > 0 {
+        let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+        let sem2 = sem.clone();
+        let rate = opts.timing.max_rate;
+        let total = ports.len();
+        tokio::spawn(async move {
+            let interval_ms = (1000u64).div_ceil(rate as u64);
+            for _ in 0..total {
+                tokio::time::sleep(Duration::from_millis(interval_ms)).await;
+                sem2.add_permits(1);
+            }
+        });
+        Some(sem)
+    } else {
+        None
+    };
 
     // Service-detection throttle: limit how many ports run detection at the
     // same time. A connect-only probe is tiny (one SYN, one RST/ACK), but
@@ -933,7 +976,9 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
     // binary probes, fallback connections). On mobile/constrained links
     // running too many at once saturates the pipe and kills connectivity.
     let svc_sem: Option<std::sync::Arc<tokio::sync::Semaphore>> = if want_service {
-        Some(std::sync::Arc::new(tokio::sync::Semaphore::new(SVC_DETECT_CONCURRENCY)))
+        Some(std::sync::Arc::new(tokio::sync::Semaphore::new(
+            SVC_DETECT_CONCURRENCY,
+        )))
     } else {
         None
     };
@@ -942,7 +987,7 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
     // sweep so the first answer shortens the wait for all the silent ports.
     let pacer = std::sync::Arc::new(Pacer::new(timeout_ms));
 
-    let sweep = stream::iter(ports.clone().into_iter())
+    let sweep = stream::iter(ports.clone())
         .map(|port| {
             let counter = counter.clone();
             let rate_sem = rate_sem.clone();
@@ -963,8 +1008,17 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
                 // (banner, HTTP probe, TLS handshake…) on that *same* socket.
                 // This fires before any middlebox rate-limit can block the
                 // reconnects that the old two-phase approach depended on.
-                let (state, reason, eager) =
-                    probe_and_sniff(ip, port, timeout_ms, retries, target, want_service, svc_sem, &pacer).await;
+                let (state, reason, eager) = probe_and_sniff(
+                    ip,
+                    port,
+                    timeout_ms,
+                    retries,
+                    target,
+                    want_service,
+                    svc_sem,
+                    &pacer,
+                )
+                .await;
                 // Stream this port the moment it resolves open — before the
                 // sweep moves on to the next one.
                 if stream_live && state == State::Open {
@@ -1023,7 +1077,11 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
     // the way: a completed handshake is shown as plain "open", the way a user
     // running a quick scan expects. -FW is the opt-in that says "scrutinise
     // this host for a firewall/middlebox and warn me".
-    let doubt = if opts.firewall_check { doubt } else { Doubt::None };
+    let doubt = if opts.firewall_check {
+        doubt
+    } else {
+        Doubt::None
+    };
     let syn_ack_unverified = doubt.is_doubtful();
     if syn_ack_unverified {
         for r in reports.iter_mut().filter(|r| r.state == State::Open) {
@@ -1069,7 +1127,7 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
             .filter_map(|r| r.eager_service.clone().map(|s| (r.port, s)))
             .collect();
 
-        let detected: Vec<(u16, ServiceInfo)> = stream::iter(open_ports.into_iter())
+        let detected: Vec<(u16, ServiceInfo)> = stream::iter(open_ports)
             .map(|port| {
                 let default = service_name(port).to_string();
                 let counter = counter.clone();
@@ -1140,12 +1198,19 @@ pub async fn scan_host(target: &str, ip: IpAddr, opts: &Options, known_alive: bo
             let host = target.to_string();
             let web_conc = concurrency.min(4).max(1);
             let profiles: Vec<(u16, Option<crate::service::web::WebProfile>)> =
-                stream::iter(web_targets.into_iter())
+                stream::iter(web_targets)
                     .map(|(port, tls)| {
                         let host = host.clone();
                         let counter = counter.clone();
                         async move {
-                            let p = crate::service::web::scan(&host, ip, port, tls, timeout_ms.max(3000)).await;
+                            let p = crate::service::web::scan(
+                                &host,
+                                ip,
+                                port,
+                                tls,
+                                timeout_ms.max(3000),
+                            )
+                            .await;
                             counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             (port, p)
                         }
@@ -1301,7 +1366,11 @@ fn emit_live_open(port: u16, svc: &Option<ServiceInfo>, color: bool) {
         .filter(|n| !n.is_empty())
         .unwrap_or_else(|| service_name(port).to_string());
     let ver = svc.as_ref().map(|s| s.describe()).unwrap_or_default();
-    let tail = if ver.is_empty() { String::new() } else { format!("  {ver}") };
+    let tail = if ver.is_empty() {
+        String::new()
+    } else {
+        format!("  {ver}")
+    };
     // Lead with a carriage-return + clear-line so this permanent line lands on
     // clean ground even when the live progress counter is mid-draw on stderr;
     // the counter simply repaints on its next tick.
@@ -1367,7 +1436,11 @@ fn infer_os(report: &HostReport) -> (String, &'static str, String, Vec<String>) 
     // 1) SNMP sysDescr — the exact OS string when present (strongest).
     if let Some(pr) = &report.probes {
         if let Some(snmp) = &pr.snmp_os {
-            let short: String = snmp.split_whitespace().take(6).collect::<Vec<_>>().join(" ");
+            let short: String = snmp
+                .split_whitespace()
+                .take(6)
+                .collect::<Vec<_>>()
+                .join(" ");
             vote(&short, 6);
             signals.push(format!("SNMP sysDescr: {snmp}"));
         }
@@ -1379,10 +1452,7 @@ fn infer_os(report: &HostReport) -> (String, &'static str, String, Vec<String>) 
             if let Some(svc) = &r.service {
                 if !svc.os_hint.is_empty() {
                     vote(&svc.os_hint, 3);
-                    signals.push(format!(
-                        "{}/{} banner -> {}",
-                        r.port, svc.name, svc.os_hint
-                    ));
+                    signals.push(format!("{}/{} banner -> {}", r.port, svc.name, svc.os_hint));
                 }
             }
         }
@@ -1391,7 +1461,10 @@ fn infer_os(report: &HostReport) -> (String, &'static str, String, Vec<String>) 
     // 3) TTL family from ping (independent corroboration of the family).
     if let Some(pr) = &report.probes {
         if let (Some(ttl), Some(fam)) = (pr.ttl, pr.ttl_family) {
-            let hops = pr.ttl_hops.map(|h| h.to_string()).unwrap_or_else(|| "?".into());
+            let hops = pr
+                .ttl_hops
+                .map(|h| h.to_string())
+                .unwrap_or_else(|| "?".into());
             signals.push(format!("ICMP TTL={ttl} (~{hops} hops) -> {fam}"));
             // Boost whichever family the TTL agrees with; otherwise vote family.
             let fam_key = if fam.starts_with("Windows") {
@@ -1463,9 +1536,8 @@ fn infer_device(report: &HostReport) -> (String, &'static str, Vec<String>) {
             .find(|r| r.port == p && r.state == State::Open)
             .and_then(|r| r.service.as_ref())
     };
-    let identified_as = |p: u16, name: &str| -> bool {
-        service_on(p).map(|s| s.name == name).unwrap_or(false)
-    };
+    let identified_as =
+        |p: u16, name: &str| -> bool { service_on(p).map(|s| s.name == name).unwrap_or(false) };
     let ttl_family = report.probes.as_ref().and_then(|p| p.ttl_family);
     let is_windows_ttl = matches!(ttl_family, Some(f) if f.starts_with("Windows"));
     let is_unix_ttl = matches!(ttl_family, Some(f) if f.starts_with("Linux"));
@@ -1616,7 +1688,11 @@ fn infer_device(report: &HostReport) -> (String, &'static str, Vec<String>) {
     // ── Media / casting devices ────────────────────────────────────────────
     if (has(8008) || has(8009)) && !identified_as(8009, "ajp13") {
         signals.push("8008-8009/tcp open — Google Cast protocol".to_string());
-        return ("Chromecast / Google Cast device (TV, speaker or Android TV)".to_string(), "medium", signals);
+        return (
+            "Chromecast / Google Cast device (TV, speaker or Android TV)".to_string(),
+            "medium",
+            signals,
+        );
     }
     if has(8060) {
         signals.push("8060/tcp open — Roku External Control Protocol".to_string());
@@ -1625,7 +1701,8 @@ fn infer_device(report: &HostReport) -> (String, &'static str, Vec<String>) {
 
     // ── IP cameras / DVRs ───────────────────────────────────────────────────
     if has(554) {
-        signals.push("554/tcp open (RTSP) — video streaming, typical of IP cameras/DVRs".to_string());
+        signals
+            .push("554/tcp open (RTSP) — video streaming, typical of IP cameras/DVRs".to_string());
         return ("IP Camera / DVR (RTSP)".to_string(), "medium", signals);
     }
 
@@ -1656,7 +1733,9 @@ fn infer_device(report: &HostReport) -> (String, &'static str, Vec<String>) {
         })
         .unwrap_or(false);
     if has(53) && (has(80) || has(443)) && !heavyweight_dns {
-        signals.push("53/tcp + 80/443 open — DNS + web admin UI, typical of a router/gateway".to_string());
+        signals.push(
+            "53/tcp + 80/443 open — DNS + web admin UI, typical of a router/gateway".to_string(),
+        );
         return ("Router / gateway".to_string(), "medium", signals);
     }
 
@@ -1743,7 +1822,10 @@ pub fn print_os_report(report: &HostReport, opts: &Options) {
                     report.target
                 ))
             );
-            println!("{}", p.dim("--------------------------------------------------"));
+            println!(
+                "{}",
+                p.dim("--------------------------------------------------")
+            );
         }
         return;
     }
@@ -1800,7 +1882,10 @@ pub fn print_os_report(report: &HostReport, opts: &Options) {
     println!("{:<14}{}", p.bold("Role:"), role);
     if let Some(pr) = &report.probes {
         if let Some(ttl) = pr.ttl {
-            let hops = pr.ttl_hops.map(|h| h.to_string()).unwrap_or_else(|| "?".into());
+            let hops = pr
+                .ttl_hops
+                .map(|h| h.to_string())
+                .unwrap_or_else(|| "?".into());
             println!(
                 "{:<14}{} (~{} hop(s), family: {})",
                 p.bold("TTL:"),
@@ -1848,7 +1933,10 @@ fn print_normal(report: &HostReport, opts: &Options) {
                     report.target
                 ))
             );
-            println!("{}", p.dim("--------------------------------------------------"));
+            println!(
+                "{}",
+                p.dim("--------------------------------------------------")
+            );
         }
         return;
     }
@@ -1917,8 +2005,11 @@ fn print_normal(report: &HostReport, opts: &Options) {
         }
     }
 
-    let open_only: Vec<&PortReport> =
-        report.ports.iter().filter(|r| r.state == State::Open).collect();
+    let open_only: Vec<&PortReport> = report
+        .ports
+        .iter()
+        .filter(|r| r.state == State::Open)
+        .collect();
 
     // Collapse the (usually huge) list of filtered/closed ports into a summary,
     // like nmap does. Only enumerate them individually when the user explicitly
@@ -1935,17 +2026,30 @@ fn print_normal(report: &HostReport, opts: &Options) {
     if open_only.is_empty() {
         println!(
             "{}",
-            p.red(&format!("[!] No open ports found on {} ({} scanned).", report.target, report.ports.len()))
+            p.red(&format!(
+                "[!] No open ports found on {} ({} scanned).",
+                report.target,
+                report.ports.len()
+            ))
         );
-        println!("{}", p.dim("--------------------------------------------------"));
+        println!(
+            "{}",
+            p.dim("--------------------------------------------------")
+        );
     }
 
     if !shown.is_empty() {
         // header
         let head = if opts.reason {
-            format!("{:<11}{:<14}{:<16}{}", "PORT", "STATE", "SERVICE", "REASON/VERSION")
+            format!(
+                "{:<11}{:<14}{:<16}{}",
+                "PORT", "STATE", "SERVICE", "REASON/VERSION"
+            )
         } else {
-            format!("{:<11}{:<14}{:<16}{}", "PORT", "STATE", "SERVICE", "VERSION")
+            format!(
+                "{:<11}{:<14}{:<16}{}",
+                "PORT", "STATE", "SERVICE", "VERSION"
+            )
         };
         println!("{}", p.bold(&head));
 
@@ -1957,13 +2061,17 @@ fn print_normal(report: &HostReport, opts: &Options) {
                 State::OpenFiltered => p.yellow(r.state.label()),
                 State::Closed => p.dim(r.state.label()),
             };
-            let svc_name = r.service.as_ref().map(|s| s.name.clone()).unwrap_or_else(|| {
-                if r.proto == "udp" {
-                    crate::scan::udp::udp_service_name(r.port).to_string()
-                } else {
-                    service_name(r.port).to_string()
-                }
-            });
+            let svc_name = r
+                .service
+                .as_ref()
+                .map(|s| s.name.clone())
+                .unwrap_or_else(|| {
+                    if r.proto == "udp" {
+                        crate::scan::udp::udp_service_name(r.port).to_string()
+                    } else {
+                        service_name(r.port).to_string()
+                    }
+                });
 
             let mut tail = String::new();
             if opts.reason {
@@ -2231,9 +2339,16 @@ fn web_json(w: Option<&crate::service::web::WebProfile>) -> String {
         json_escape(&w.generator),
         opt_str(&w.waf),
         opt_str(&w.cdn),
-        w.favicon_hash.map(|h| h.to_string()).unwrap_or_else(|| "null".to_string()),
+        w.favicon_hash
+            .map(|h| h.to_string())
+            .unwrap_or_else(|| "null".to_string()),
         w.sec.grade(),
-        w.sec.missing().iter().map(|m| format!("\"{m}\"")).collect::<Vec<_>>().join(","),
+        w.sec
+            .missing()
+            .iter()
+            .map(|m| format!("\"{m}\""))
+            .collect::<Vec<_>>()
+            .join(","),
         techs
     )
 }
@@ -2283,7 +2398,12 @@ fn print_json(report: &HostReport, opts: &Options) {
             })
             .collect();
         let hostnames: Vec<String> = svc
-            .map(|s| s.hostnames.iter().map(|h| format!("\"{}\"", json_escape(h))).collect())
+            .map(|s| {
+                s.hostnames
+                    .iter()
+                    .map(|h| format!("\"{}\"", json_escape(h)))
+                    .collect()
+            })
             .unwrap_or_default();
         ports_json.push(format!(
             "{{\"port\":{},\"protocol\":\"{}\",\"state\":\"{}\",\"service\":\"{}\",\"product\":\"{}\",\
@@ -2419,7 +2539,11 @@ mod tests {
     fn only_a_completed_handshake_is_open() {
         assert_eq!(classify(Attempt::Handshake), (State::Open, "syn-ack"));
         for a in [Attempt::Refused, Attempt::Error, Attempt::NoAnswer] {
-            assert_ne!(classify(a).0, State::Open, "{a:?} must not classify as open");
+            assert_ne!(
+                classify(a).0,
+                State::Open,
+                "{a:?} must not classify as open"
+            );
         }
     }
 
@@ -2427,7 +2551,10 @@ mod tests {
     #[test]
     fn only_a_refusal_is_closed() {
         assert_eq!(classify(Attempt::Refused), (State::Closed, "conn-refused"));
-        assert_eq!(attempt_from_io(&Error::from(ErrorKind::ConnectionRefused)), Attempt::Refused);
+        assert_eq!(
+            attempt_from_io(&Error::from(ErrorKind::ConnectionRefused)),
+            Attempt::Refused
+        );
     }
 
     /// Every other connect error falls to filtered. No default branch may
@@ -2469,7 +2596,10 @@ mod tests {
         // Phase 1: open — probe a live listener.
         let listener = tokio::net::TcpListener::bind((ip, 0)).await.unwrap();
         let port = listener.local_addr().unwrap().port();
-        assert_eq!(probe_port(ip, port, 1000, 0).await, (State::Open, "syn-ack"));
+        assert_eq!(
+            probe_port(ip, port, 1000, 0).await,
+            (State::Open, "syn-ack")
+        );
         drop(listener);
 
         // Phase 2: no service — a fresh port never connected to, so the backlog
@@ -2590,10 +2720,16 @@ mod tests {
     /// port-number guess alone is not evidence.
     #[test]
     fn only_a_replying_service_counts_as_evidence() {
-        let guess = ServiceInfo { name: "http".to_string(), ..Default::default() };
+        let guess = ServiceInfo {
+            name: "http".to_string(),
+            ..Default::default()
+        };
         assert!(!guess.has_evidence());
 
-        let replied = ServiceInfo { banner: "SSH-2.0-OpenSSH_8.2p1".to_string(), ..guess.clone() };
+        let replied = ServiceInfo {
+            banner: "SSH-2.0-OpenSSH_8.2p1".to_string(),
+            ..guess.clone()
+        };
         assert!(replied.has_evidence());
     }
 }

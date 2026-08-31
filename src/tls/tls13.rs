@@ -355,7 +355,13 @@ fn fe_mul(f: &Fe, g: &Fe) -> Fe {
     h[1] += h[0] >> 51;
     h[0] &= M;
 
-    [h[0] as u64, h[1] as u64, h[2] as u64, h[3] as u64, h[4] as u64]
+    [
+        h[0] as u64,
+        h[1] as u64,
+        h[2] as u64,
+        h[3] as u64,
+        h[4] as u64,
+    ]
 }
 
 fn fe_sq(f: &Fe) -> Fe {
@@ -408,7 +414,13 @@ fn fe_mul121666(f: &Fe) -> Fe {
     h[3] &= M;
     h[0] += 19 * (h[4] >> 51);
     h[4] &= M;
-    [h[0] as u64, h[1] as u64, h[2] as u64, h[3] as u64, h[4] as u64]
+    [
+        h[0] as u64,
+        h[1] as u64,
+        h[2] as u64,
+        h[3] as u64,
+        h[4] as u64,
+    ]
 }
 
 /// Swap `a` and `b` when `swap` is 1, using arithmetic rather than a branch so
@@ -546,12 +558,8 @@ fn chacha20_block(key: &[u8; 32], counter: u32, nonce: &[u8; 12]) -> [u8; 64] {
     state[2] = 0x79622d32;
     state[3] = 0x6b206574;
     for i in 0..8 {
-        state[4 + i] = u32::from_le_bytes([
-            key[i * 4],
-            key[i * 4 + 1],
-            key[i * 4 + 2],
-            key[i * 4 + 3],
-        ]);
+        state[4 + i] =
+            u32::from_le_bytes([key[i * 4], key[i * 4 + 1], key[i * 4 + 2], key[i * 4 + 3]]);
     }
     state[12] = counter;
     for i in 0..3 {
@@ -1166,7 +1174,13 @@ fn is_dns_name(h: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
 }
 
-fn client_hello(host: &str, pubkey: &[u8; 32], random: &[u8], session_id: &[u8], alpn: &[&str]) -> Vec<u8> {
+fn client_hello(
+    host: &str,
+    pubkey: &[u8; 32],
+    random: &[u8],
+    session_id: &[u8],
+    alpn: &[&str],
+) -> Vec<u8> {
     let mut exts: Vec<u8> = Vec::new();
 
     if is_dns_name(host) {
@@ -1363,7 +1377,12 @@ fn alert_text(payload: &[u8]) -> String {
 
 /// Decrypt one application_data record and strip TLS 1.3's inner padding,
 /// returning (real_content_type, plaintext).
-fn decrypt_record(suite: Suite, keys: &mut Keys, header: &[u8], body: &[u8]) -> Result<(u8, Vec<u8>), String> {
+fn decrypt_record(
+    suite: Suite,
+    keys: &mut Keys,
+    header: &[u8],
+    body: &[u8],
+) -> Result<(u8, Vec<u8>), String> {
     let nonce = keys.nonce();
     keys.seq += 1;
     let mut inner = suite
@@ -1526,7 +1545,8 @@ pub async fn handshake(
     }
 
     // ── Certificate checks ─────────────────────────────────────────────────
-    let (cert_summary, names_ok) = check_certificate(certificates.first().map(|v| v.as_slice()), host)?;
+    let (cert_summary, names_ok) =
+        check_certificate(certificates.first().map(|v| v.as_slice()), host)?;
 
     // ── Client Finished, then the application keys ─────────────────────────
     let transcript_after_sf = transcript.clone().finish();
@@ -1581,8 +1601,9 @@ fn parse_server_hello(msg: &[u8]) -> Result<(Suite, [u8; 32]), String> {
         return Err("short ServerHello".into());
     }
     let suite_id = ((body[i] as u16) << 8) | body[i + 1] as u16;
-    let suite = Suite::from_id(suite_id)
-        .ok_or_else(|| format!("server chose cipher suite 0x{suite_id:04x}, which this client does not implement"))?;
+    let suite = Suite::from_id(suite_id).ok_or_else(|| {
+        format!("server chose cipher suite 0x{suite_id:04x}, which this client does not implement")
+    })?;
     i += 3; // cipher suite + compression method
 
     if body.len() < i + 2 {
@@ -1972,10 +1993,7 @@ mod tests {
             sealed[plain.len()..].to_vec(),
             hex("5bc94fbc3221a5db94fae95ae7121a47")
         );
-        assert_eq!(
-            aes128gcm_open(&key, &nonce, &aad, &sealed).unwrap(),
-            plain
-        );
+        assert_eq!(aes128gcm_open(&key, &nonce, &aad, &sealed).unwrap(), plain);
         let mut bad = sealed.clone();
         bad[3] ^= 0x80;
         assert!(aes128gcm_open(&key, &nonce, &aad, &bad).is_none());

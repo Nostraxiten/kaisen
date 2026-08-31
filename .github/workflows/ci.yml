@@ -10,15 +10,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
+
+      - name: Formato (cargo fmt)
+        run: cargo fmt --check
+
       - name: Build
         run: cargo build --verbose
-      - name: Test
+
+      - name: Tests
         run: cargo test --verbose
-      - name: Clippy
-        run: cargo clippy -- -D warnings || true
+
+      - name: Clippy (errores estrictos)
+        run: cargo clippy -- -D warnings
+
       - name: Smoke test
         run: |
           cargo run -- --version

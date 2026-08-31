@@ -1,0 +1,21 @@
+name: audit-semanal
+
+on:
+  schedule:
+    # Cada lunes a las 08:00 UTC
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Instalar cargo-audit
+        run: cargo install cargo-audit --quiet
+
+      - name: Auditoría de dependencias
+        run: cargo audit

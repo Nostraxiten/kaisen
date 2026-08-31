@@ -2,6 +2,21 @@
 //!
 //! Punto de entrada: parsea los argumentos y despacha al escáner o al resolvedor DNS.
 
+#![allow(
+    clippy::manual_range_contains,
+    clippy::type_complexity,
+    clippy::too_many_arguments,
+    clippy::format_in_format_args,
+    clippy::redundant_locals,
+    clippy::manual_clamp,
+    clippy::manual_pattern_char_comparison,
+    clippy::question_mark,
+    clippy::collapsible_match,
+    clippy::if_same_then_else,
+    clippy::single_element_loop,
+    clippy::doc_lazy_continuation
+)]
+
 mod cli;
 mod dns;
 mod ports;
@@ -16,9 +31,9 @@ use std::process::ExitCode;
 use std::time::Instant;
 
 use cli::{Mode, Options, OutputFormat};
-use util::output::Painter;
 use dns::{nsaudit, whois};
-use scan::{neigh, mail};
+use scan::{mail, neigh};
+use util::output::Painter;
 
 fn banner(p: &Painter) {
     let art = r#"
@@ -70,19 +85,22 @@ async fn main() -> ExitCode {
 
     match opts.mode {
         Mode::Help => {
-            print!("{}", cli::help_text(opts.help_topic.as_deref(), opts.help_spanish));
+            print!(
+                "{}",
+                cli::help_text(opts.help_topic.as_deref(), opts.help_spanish)
+            );
             ExitCode::SUCCESS
         }
         Mode::Version => {
             println!("{}", cli::version_text());
             ExitCode::SUCCESS
         }
-        Mode::Dns      => run_dns(&opts).await,
-        Mode::Mail     => run_mail(&opts).await,
-        Mode::Lookup   => run_lookup(&opts).await,
-        Mode::Whois    => run_whois(&opts).await,
+        Mode::Dns => run_dns(&opts).await,
+        Mode::Mail => run_mail(&opts).await,
+        Mode::Lookup => run_lookup(&opts).await,
+        Mode::Whois => run_whois(&opts).await,
         Mode::Neighbor => run_neighbor(&opts).await,
-        Mode::NsAudit  => run_nsaudit(&opts).await,
+        Mode::NsAudit => run_nsaudit(&opts).await,
         Mode::VulnList => {
             vuln::print_catalogue(opts.min_severity, opts.color);
             ExitCode::SUCCESS
@@ -149,7 +167,11 @@ async fn run_whois(opts: &Options) -> ExitCode {
         }
     }
     let _ = p;
-    if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE }
+    if ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
+    }
 }
 
 async fn run_lookup(opts: &Options) -> ExitCode {
@@ -208,7 +230,11 @@ async fn lookup_profile(name: &str, server: std::net::SocketAddr, timeout_ms: u6
                 }
             }
             Err(e) => {
-                println!("{:<7} {}", p.magenta(t), p.dim(&format!("(query failed: {e})")));
+                println!(
+                    "{:<7} {}",
+                    p.magenta(t),
+                    p.dim(&format!("(query failed: {e})"))
+                );
             }
         }
     }
@@ -344,7 +370,10 @@ async fn run_scan(opts_in: &Options) -> ExitCode {
         hosts.retain(|(_, ip)| !excluded.contains(ip));
         let dropped = before - hosts.len();
         if dropped > 0 && opts.output == OutputFormat::Normal {
-            eprintln!("{}", p.dim(&format!("Excluded {dropped} host(s) by request.")));
+            eprintln!(
+                "{}",
+                p.dim(&format!("Excluded {dropped} host(s) by request."))
+            );
         }
     }
 
@@ -450,7 +479,7 @@ async fn run_dns(opts: &Options) -> ExitCode {
     let explicit_server = opts.dns_server.clone();
     let dot_name = match (&explicit_server, opts.dns_dot) {
         (Some(s), _) => s.clone(),
-        (None, true)  => dns::DEFAULT_DOT_HOST.to_string(),
+        (None, true) => dns::DEFAULT_DOT_HOST.to_string(),
         (None, false) => String::new(),
     };
     let effective_server = if opts.dns_dot && explicit_server.is_none() {
@@ -490,7 +519,11 @@ async fn run_dns(opts: &Options) -> ExitCode {
     // resolvedor por la respuesta final.
     if opts.dns_trace {
         for target in &opts.targets {
-            let qtype_s = opts.dns_types.first().cloned().unwrap_or_else(|| "A".to_string());
+            let qtype_s = opts
+                .dns_types
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "A".to_string());
             let qtype = dns::type_to_num(&qtype_s).unwrap_or(1);
             print_trace(target, &qtype_s, qtype, timeout_ms, &p).await;
         }
@@ -539,7 +572,10 @@ async fn run_dns(opts: &Options) -> ExitCode {
             match target.parse::<IpAddr>() {
                 Ok(ip) => vec![(dns::reverse_name(ip), "PTR".to_string())],
                 Err(_) => {
-                    eprintln!("{}", p.red(&format!("[!] -x needs an IP address, got '{target}'")));
+                    eprintln!(
+                        "{}",
+                        p.red(&format!("[!] -x needs an IP address, got '{target}'"))
+                    );
                     had_error = true;
                     continue;
                 }
@@ -569,7 +605,11 @@ async fn run_dns(opts: &Options) -> ExitCode {
                 dnssec: opts.dns_dnssec,
                 nsid: opts.dns_nsid,
                 no_recurse: opts.dns_norec,
-                udp_size: if opts.dns_dnssec || opts.dns_nsid { 4096 } else { 0 },
+                udp_size: if opts.dns_dnssec || opts.dns_nsid {
+                    4096
+                } else {
+                    0
+                },
                 client_subnet: opts.dns_subnet,
             };
             // +dot / --doh envían la consulta por un canal cifrado; cualquier otra cosa
@@ -625,7 +665,10 @@ async fn print_trace(name: &str, qtype_s: &str, qtype: u16, timeout_ms: u64, p: 
 
     let steps = dns::trace(name, qtype, timeout_ms).await;
     if steps.is_empty() {
-        println!("{}", p.red("[!] no root server answered — check outbound UDP/53"));
+        println!(
+            "{}",
+            p.red("[!] no root server answered — check outbound UDP/53")
+        );
         return;
     }
 
@@ -666,10 +709,16 @@ async fn print_trace(name: &str, qtype_s: &str, qtype: u16, timeout_ms: u64, p: 
         }
     }
 
-    let answered = steps.last().map(|s| !s.response.answers.is_empty()).unwrap_or(false);
+    let answered = steps
+        .last()
+        .map(|s| !s.response.answers.is_empty())
+        .unwrap_or(false);
     println!();
     if answered {
-        println!("{}", p.green(&format!("Resolved in {} hop(s).", steps.len())));
+        println!(
+            "{}",
+            p.green(&format!("Resolved in {} hop(s).", steps.len()))
+        );
     } else {
         println!(
             "{}",
@@ -709,7 +758,12 @@ fn print_dns(qname: &str, qtype: &str, resp: &dns::Response, opts: &Options, p: 
         if resp.answers.is_empty() {
             eprintln!(
                 "{}",
-                p.dim(&format!(";; {} {} -> {}", qname, qtype, dns::rcode_str(resp.rcode)))
+                p.dim(&format!(
+                    ";; {} {} -> {}",
+                    qname,
+                    qtype,
+                    dns::rcode_str(resp.rcode)
+                ))
             );
         }
         return;
@@ -725,7 +779,11 @@ fn print_dns(qname: &str, qtype: &str, resp: &dns::Response, opts: &Options, p: 
         if resp.via_tcp { "TCP" } else { "UDP" }
     );
     let status = dns::rcode_str(resp.rcode);
-    let status_c = if resp.rcode == 0 { p.green(status) } else { p.red(status) };
+    let status_c = if resp.rcode == 0 {
+        p.green(status)
+    } else {
+        p.red(status)
+    };
     println!(
         ";; status: {}, flags: {}, answers: {}, authority: {}, additional: {}, time: {}ms",
         status_c,
@@ -746,10 +804,17 @@ fn print_dns(qname: &str, qtype: &str, resp: &dns::Response, opts: &Options, p: 
         } else {
             format!("tailored to the first {scope} bits of the network")
         };
-        println!(";; CLIENT-SUBNET: scope /{} — {}", p.cyan(&scope.to_string()), p.dim(&note));
+        println!(
+            ";; CLIENT-SUBNET: scope /{} — {}",
+            p.cyan(&scope.to_string()),
+            p.dim(&note)
+        );
     }
     if resp.ad {
-        println!(";; {}", p.green("DNSSEC: answer validated by the resolver (AD flag set)"));
+        println!(
+            ";; {}",
+            p.green("DNSSEC: answer validated by the resolver (AD flag set)")
+        );
     }
 
     if !resp.answers.is_empty() {

@@ -20,20 +20,20 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio::time::timeout;
 
-use probe::first_version;
 use crate::tls;
+use probe::first_version;
 
 #[derive(Debug, Clone, Default)]
 pub struct ServiceInfo {
-    pub name: String,        // e.g. "http", "ssh"
-    pub product: String,     // e.g. "OpenSSH", "nginx"
-    pub version: String,     // e.g. "8.2p1"
-    pub extra: String,       // e.g. "Ubuntu 4ubuntu0.5"
-    pub banner: String,      // raw banner (trimmed)
-    pub os_hint: String,     // OS inferred from banner, if any
-    pub tls_version: String, // negotiated TLS/SSL version, when the port speaks TLS
-    pub cert_expired: bool,  // certificate notAfter is in the past
-    pub self_signed: bool,   // certificate subject == issuer
+    pub name: String,           // e.g. "http", "ssh"
+    pub product: String,        // e.g. "OpenSSH", "nginx"
+    pub version: String,        // e.g. "8.2p1"
+    pub extra: String,          // e.g. "Ubuntu 4ubuntu0.5"
+    pub banner: String,         // raw banner (trimmed)
+    pub os_hint: String,        // OS inferred from banner, if any
+    pub tls_version: String,    // negotiated TLS/SSL version, when the port speaks TLS
+    pub cert_expired: bool,     // certificate notAfter is in the past
+    pub self_signed: bool,      // certificate subject == issuer
     pub hostnames: Vec<String>, // names learned from the certificate (CN + SANs)
     /// True when the service returned *any* bytes during detection — even
     /// binary data we could not parse into a product string. A middlebox that
@@ -111,11 +111,11 @@ enum Bin {
 fn plan_for(port: u16) -> Plan {
     match port {
         // ── plain HTTP, and web UIs worth asking a specific path for ────────
-        80 | 81 | 82 | 83 | 84 | 591 | 3000 | 3001 | 4200 | 5000 | 5001 | 7080 | 8000
-        | 8001 | 8002 | 8003 | 8008 | 8010 | 8060 | 8069 | 8080 | 8081 | 8082 | 8083 | 8085
-        | 8088 | 8090 | 8095 | 8096 | 8112 | 8123 | 8181 | 8291 | 8500 | 8600 | 8765 | 8787
-        | 8880 | 8888 | 8889 | 9080 | 9090 | 9091 | 9100 | 9111 | 9200 | 9300 | 9981 | 10000
-        | 32400 | 3128 | 5601 | 5800 | 55555 | 61208 => Plan::Http("/"),
+        80 | 81 | 82 | 83 | 84 | 591 | 3000 | 3001 | 4200 | 5000 | 5001 | 7080 | 8000 | 8001
+        | 8002 | 8003 | 8008 | 8010 | 8060 | 8069 | 8080 | 8081 | 8082 | 8083 | 8085 | 8088
+        | 8090 | 8095 | 8096 | 8112 | 8123 | 8181 | 8291 | 8500 | 8600 | 8765 | 8787 | 8880
+        | 8888 | 8889 | 9080 | 9090 | 9091 | 9100 | 9111 | 9200 | 9300 | 9981 | 10000 | 32400
+        | 3128 | 5601 | 5800 | 55555 | 61208 => Plan::Http("/"),
         2375 | 2376 => Plan::Http("/version"),
         2379 | 2380 | 4001 => Plan::Http("/version"),
         8086 => Plan::Http("/ping"),
@@ -127,10 +127,10 @@ fn plan_for(port: u16) -> Plan {
         6800 | 6801 => Plan::Http("/"),
 
         // ── TLS-wrapped ports ───────────────────────────────────────────────
-        443 | 444 | 448 | 465 | 563 | 585 | 614 | 636 | 853 | 989 | 990 | 992 | 993 | 994
-        | 995 | 1311 | 2083 | 2087 | 2096 | 2484 | 3269 | 4443 | 5061 | 5986 | 6443 | 6697
-        | 7443 | 8443 | 8834 | 8883 | 9001 | 9443 | 10250 | 10443 | 16443 | 18091 | 18092
-        | 27019 | 32443 | 44300 | 47001 => Plan::Tls,
+        443 | 444 | 448 | 465 | 563 | 585 | 614 | 636 | 853 | 989 | 990 | 992 | 993 | 994 | 995
+        | 1311 | 2083 | 2087 | 2096 | 2484 | 3269 | 4443 | 5061 | 5986 | 6443 | 6697 | 7443
+        | 8443 | 8834 | 8883 | 9001 | 9443 | 10250 | 10443 | 16443 | 18091 | 18092 | 27019
+        | 32443 | 44300 | 47001 => Plan::Tls,
 
         // ── binary / handshake protocols ────────────────────────────────────
         139 | 445 => Plan::Bin(Bin::Smb),
@@ -142,7 +142,7 @@ fn plan_for(port: u16) -> Plan {
         53 | 5353 | 5355 => Plan::Bin(Bin::Dns),
         25565 | 25575 | 19132 => Plan::Bin(Bin::Minecraft),
         4369 => Plan::Bin(Bin::Epmd),
-        9092 | 9093 | 9094 => Plan::Bin(Bin::Kafka),
+        9092..=9094 => Plan::Bin(Bin::Kafka),
         3389 | 3388 => Plan::Bin(Bin::Rdp),
         6000..=6009 => Plan::Bin(Bin::X11),
         389 | 3268 => Plan::Bin(Bin::Ldap),
@@ -155,15 +155,17 @@ fn plan_for(port: u16) -> Plan {
         6379 | 6380 | 16379 => Plan::Text(b"INFO\r\nPING\r\n"),
         11211 | 11212 => Plan::Text(b"version\r\nstats\r\n"),
         2181 | 2182 | 2888 | 3888 => Plan::Text(b"srvr"),
-        554 | 8554 | 1935 | 7070 => Plan::Text(
-            b"OPTIONS * RTSP/1.0\r\nCSeq: 1\r\nUser-Agent: Kaisen\r\n\r\n",
-        ),
+        554 | 8554 | 1935 | 7070 => {
+            Plan::Text(b"OPTIONS * RTSP/1.0\r\nCSeq: 1\r\nUser-Agent: Kaisen\r\n\r\n")
+        }
         5060 | 5062 | 5080 => Plan::Text(
             b"OPTIONS sip:kaisen SIP/2.0\r\nVia: SIP/2.0/TCP kaisen;branch=z9hG4bKkaisen\r\n\
               From: <sip:kaisen@kaisen>;tag=1\r\nTo: <sip:kaisen>\r\nCall-ID: kaisen\r\n\
               CSeq: 1 OPTIONS\r\nMax-Forwards: 70\r\nContent-Length: 0\r\n\r\n",
         ),
-        194 | 6660..=6669 | 6679 | 7000 => Plan::Text(b"NICK kaisen\r\nUSER kaisen 0 * :kaisen\r\n"),
+        194 | 6660..=6669 | 6679 | 7000 => {
+            Plan::Text(b"NICK kaisen\r\nUSER kaisen 0 * :kaisen\r\n")
+        }
         70 => Plan::Text(b"\r\n"),
         79 => Plan::Text(b"root\r\n"),
         43 | 4321 => Plan::Text(b"kaisen\r\n"),
@@ -176,7 +178,12 @@ fn plan_for(port: u16) -> Plan {
 /// Probe an open port for its service banner/version. `default_name` is the
 /// nmap-services guess used when we cannot read anything useful; `host` is the
 /// name the user asked for, used for TLS SNI and virtual-host aware requests.
-pub async fn detect(addr: SocketAddr, default_name: &str, timeout_ms: u64, host: &str) -> ServiceInfo {
+pub async fn detect(
+    addr: SocketAddr,
+    default_name: &str,
+    timeout_ms: u64,
+    host: &str,
+) -> ServiceInfo {
     let mut info = ServiceInfo {
         name: default_name.to_string(),
         ..Default::default()
@@ -219,7 +226,11 @@ pub async fn detect(addr: SocketAddr, default_name: &str, timeout_ms: u64, host:
     // before it greets, and where that lookup has to time out first the
     // handshake arrives seconds late — which showed up as an open 3306 with an
     // empty VERSION column.
-    let listen_ms = if probe_bytes.is_some() { 400 } else { (dur.as_millis() as u64).max(900) };
+    let listen_ms = if probe_bytes.is_some() {
+        400
+    } else {
+        (dur.as_millis() as u64).max(900)
+    };
 
     let mut stream = match timeout(dur, TcpStream::connect(addr)).await {
         Ok(Ok(s)) => s,
@@ -351,7 +362,11 @@ pub async fn detect_with_stream(
     // before it greets, and where that lookup has to time out first the
     // handshake arrives seconds late — which showed up as an open 3306 with an
     // empty VERSION column.
-    let listen_ms = if probe_bytes.is_some() { 400 } else { (dur.as_millis() as u64).max(900) };
+    let listen_ms = if probe_bytes.is_some() {
+        400
+    } else {
+        (dur.as_millis() as u64).max(900)
+    };
     let mut data = read_for(&mut stream, Duration::from_millis(listen_ms), 8192).await;
 
     if data.is_empty() {
@@ -403,7 +418,12 @@ pub async fn detect_with_stream(
     info
 }
 
-async fn run_binary(kind: Bin, addr: SocketAddr, host: &str, dur: Duration) -> Option<probe::Probed> {
+async fn run_binary(
+    kind: Bin,
+    addr: SocketAddr,
+    host: &str,
+    dur: Duration,
+) -> Option<probe::Probed> {
     let mut s = match timeout(dur, TcpStream::connect(addr)).await {
         Ok(Ok(s)) => s,
         _ => return None,
@@ -587,7 +607,10 @@ async fn follow_up(stream: &mut TcpStream, _port: u16, dur: Duration, info: &mut
             // "215 UNIX Type: L8" / "215 Windows_NT" — a strong OS signal.
             for line in text.lines() {
                 let line = line.trim();
-                if let Some(rest) = line.strip_prefix("215 ").or_else(|| line.strip_prefix("215-")) {
+                if let Some(rest) = line
+                    .strip_prefix("215 ")
+                    .or_else(|| line.strip_prefix("215-"))
+                {
                     if info.extra.is_empty() {
                         info.extra = rest.trim().to_string();
                     }
@@ -721,7 +744,11 @@ fn parse_banner(port: u16, data: &[u8], info: &mut ServiceInfo) {
     }
 
     // FTP: "220 (vsFTPd 3.0.3)" / "220 ProFTPD 1.3.5 Server"
-    if port == 21 || port == 990 || port == 2121 || first.starts_with("220 ") || first.starts_with("220-")
+    if port == 21
+        || port == 990
+        || port == 2121
+        || first.starts_with("220 ")
+        || first.starts_with("220-")
     {
         // 220 is also SMTP's greeting, so let the content decide.
         let is_smtp = first.contains("ESMTP")
@@ -816,7 +843,9 @@ fn parse_banner(port: u16, data: &[u8], info: &mut ServiceInfo) {
         || first.contains("SMTP")
     {
         info.name = if port == 587 { "submission" } else { "smtp" }.into();
-        info.product = match_mail_product(first).map(|s| s.to_string()).unwrap_or_default();
+        info.product = match_mail_product(first)
+            .map(|s| s.to_string())
+            .unwrap_or_default();
         info.version = extract_version(first);
         if info.product.contains("Microsoft") || info.product.contains("Exchange") {
             info.os_hint = "Windows".into();
@@ -828,21 +857,26 @@ fn parse_banner(port: u16, data: &[u8], info: &mut ServiceInfo) {
     // POP3 / IMAP
     if first.starts_with("+OK") {
         info.name = "pop3".into();
-        info.product = match_mail_product(first).map(|s| s.to_string()).unwrap_or_default();
+        info.product = match_mail_product(first)
+            .map(|s| s.to_string())
+            .unwrap_or_default();
         info.version = extract_version(first);
         detect_os_from_text(first, info);
         return;
     }
     if first.starts_with("* OK") || first.starts_with("* PREAUTH") || first.contains("IMAP4") {
         info.name = "imap".into();
-        info.product = match_mail_product(first).map(|s| s.to_string()).unwrap_or_default();
+        info.product = match_mail_product(first)
+            .map(|s| s.to_string())
+            .unwrap_or_default();
         info.version = extract_version(first);
         detect_os_from_text(first, info);
         return;
     }
 
     // NNTP: "200 news.example.com InterNetNews NNRP server INN 2.6.3 ready"
-    if first.starts_with("200 ") && (first.contains("NNTP") || first.contains("NNRP") || port == 119)
+    if first.starts_with("200 ")
+        && (first.contains("NNTP") || first.contains("NNRP") || port == 119)
     {
         info.name = "nntp".into();
         info.product = extract_product(first, &["INN", "Diablo", "Cyclone", "leafnode", "NNTP"]);
@@ -989,7 +1023,15 @@ fn parse_banner(port: u16, data: &[u8], info: &mut ServiceInfo) {
         if info.product.is_empty() {
             info.product = extract_product(
                 &text,
-                &["UnrealIRCd", "InspIRCd", "ngIRCd", "Charybdis", "Solanum", "ircd-hybrid", "IRC"],
+                &[
+                    "UnrealIRCd",
+                    "InspIRCd",
+                    "ngIRCd",
+                    "Charybdis",
+                    "Solanum",
+                    "ircd-hybrid",
+                    "IRC",
+                ],
             );
             info.version = extract_version(&text);
         }
@@ -1002,7 +1044,13 @@ fn parse_banner(port: u16, data: &[u8], info: &mut ServiceInfo) {
         let visible = strip_telnet(data);
         let clean = visible.trim();
         if !clean.is_empty() {
-            info.banner = clean.lines().next().unwrap_or("").chars().take(120).collect();
+            info.banner = clean
+                .lines()
+                .next()
+                .unwrap_or("")
+                .chars()
+                .take(120)
+                .collect();
             info.product = match_app(clean)
                 .map(|s| s.to_string())
                 .unwrap_or_else(|| "Telnet service".to_string());
@@ -1064,7 +1112,13 @@ fn parse_mysql(data: &[u8], info: &mut ServiceInfo) -> bool {
         None => return false,
     };
     let raw = String::from_utf8_lossy(&data[5..end]).to_string();
-    if raw.is_empty() || !raw.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+    if raw.is_empty()
+        || !raw
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
+    {
         return false;
     }
 
@@ -1093,7 +1147,11 @@ fn parse_mysql(data: &[u8], info: &mut ServiceInfo) -> bool {
     // would pin a decade of MySQL CVEs on an engine that never had them.
     let (product, version, matched, own_used) = match flavor {
         Some((needle, label, own)) => {
-            let own_version = if own.is_empty() { None } else { version_after(&low, own) };
+            let own_version = if own.is_empty() {
+                None
+            } else {
+                version_after(&low, own)
+            };
             let used = own_version.is_some();
             let version = own_version.unwrap_or_else(|| leading_version(&reported));
             ((*label).to_string(), version, *needle, used)
@@ -1112,7 +1170,10 @@ fn parse_mysql(data: &[u8], info: &mut ServiceInfo) -> bool {
         push_unique(&mut extras, series);
     }
     // Oracle's paid builds say so in the version string; nothing else does.
-    if let Some((_, edition)) = MYSQL_EDITIONS.iter().find(|(needle, _)| low.contains(needle)) {
+    if let Some((_, edition)) = MYSQL_EDITIONS
+        .iter()
+        .find(|(needle, _)| low.contains(needle))
+    {
         push_unique(&mut extras, edition);
     }
     for (needle, label) in MYSQL_BUILD_FLAGS {
@@ -1128,8 +1189,13 @@ fn parse_mysql(data: &[u8], info: &mut ServiceInfo) -> bool {
     // Whatever the packager wrote after the first dash — "0ubuntu0.22.04.1",
     // "1:10.11.6+maria~ubu2204", Percona's "-27". Kept only when it carries a
     // number, so a tail that is purely a tag named above isn't repeated.
-    let build: String =
-        reported.split_once('-').map(|x| x.1).unwrap_or("").chars().take(60).collect();
+    let build: String = reported
+        .split_once('-')
+        .map(|x| x.1)
+        .unwrap_or("")
+        .chars()
+        .take(60)
+        .collect();
     // The flavour's own name in front of that tail is already the product name.
     let build = match !matched.is_empty() && build.to_ascii_lowercase().starts_with(matched) {
         true => build[matched.len()..].trim_start_matches(['-', '_', ' ']),
@@ -1152,7 +1218,11 @@ fn parse_mysql(data: &[u8], info: &mut ServiceInfo) -> bool {
     if let Some(caps) = mysql_capabilities(data, end) {
         push_unique(
             &mut extras,
-            if caps & MYSQL_CLIENT_SSL != 0 { "TLS supported" } else { "no TLS offered" },
+            if caps & MYSQL_CLIENT_SSL != 0 {
+                "TLS supported"
+            } else {
+                "no TLS offered"
+            },
         );
         if caps & MYSQL_CLIENT_COMPRESS != 0 {
             push_unique(&mut extras, "compression offered");
@@ -1178,7 +1248,10 @@ fn parse_mysql_error(data: &[u8], info: &mut ServiceInfo) -> bool {
     let code = u16::from_le_bytes([*data.get(5).unwrap_or(&0), *data.get(6).unwrap_or(&0)]);
     let msg = String::from_utf8_lossy(&data[7.min(data.len())..data.len().min(200)]).to_string();
     let low = msg.to_ascii_lowercase();
-    let known = MYSQL_ERRORS.iter().find(|(c, _)| *c == code).map(|(_, text)| *text);
+    let known = MYSQL_ERRORS
+        .iter()
+        .find(|(c, _)| *c == code)
+        .map(|(_, text)| *text);
     let flavor = MYSQL_FLAVORS
         .iter()
         .filter(|(needle, _, _)| low.contains(needle))
@@ -1228,7 +1301,10 @@ fn mysql_capabilities(data: &[u8], end: usize) -> Option<u32> {
 /// The server's default collation, one byte past the low capability flags.
 fn mysql_collation(data: &[u8], end: usize) -> Option<&'static str> {
     let id = *data.get(end + 16)?;
-    MYSQL_COLLATIONS.iter().find(|(k, _)| *k == id).map(|(_, name)| *name)
+    MYSQL_COLLATIONS
+        .iter()
+        .find(|(k, _)| *k == id)
+        .map(|(_, name)| *name)
 }
 
 /// Name the release series a version belongs to, and say whether that series
@@ -1254,7 +1330,10 @@ fn mysql_series(product: &str, version: &str) -> Option<&'static str> {
         p if p.contains("MySQL") || p.contains("Percona") => MYSQL_BRANCHES,
         _ => return None,
     };
-    if let Some((_, label)) = table.iter().find(|((ma, mi), _)| (*ma, *mi) == (major, minor)) {
+    if let Some((_, label)) = table
+        .iter()
+        .find(|((ma, mi), _)| (*ma, *mi) == (major, minor))
+    {
         return Some(label);
     }
     // A series newer than this table: name the track rather than invent a date.
@@ -1271,7 +1350,10 @@ fn mysql_series(product: &str, version: &str) -> Option<&'static str> {
 /// everything past the first dash is the packager's business.
 fn leading_version(s: &str) -> String {
     let head = s.split('-').next().unwrap_or("").trim();
-    let num: String = head.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+    let num: String = head
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
     // Aurora reports "5.6.10a", and that letter is part of the number. Anything
     // longer than one letter is a fork's name glued to it, as in
     // "8.0.mysql_aurora.3.04.0", and only the digits in front are the version.
@@ -1621,7 +1703,12 @@ fn parse_http(port: u16, text: &str, info: &mut ServiceInfo) {
     // A 401 names the realm, which on embedded devices is the model number.
     if let Some(auth) = get("www-authenticate") {
         if let Some(realm) = auth.split("realm=").nth(1) {
-            let realm = realm.trim().trim_matches('"').split('"').next().unwrap_or("");
+            let realm = realm
+                .trim()
+                .trim_matches('"')
+                .split('"')
+                .next()
+                .unwrap_or("");
             if !realm.is_empty() {
                 extras.push(format!("realm \"{realm}\""));
                 if info.product.is_empty() {
@@ -1631,12 +1718,7 @@ fn parse_http(port: u16, text: &str, info: &mut ServiceInfo) {
                 }
             }
         }
-        extras.push(
-            auth.split_whitespace()
-                .next()
-                .unwrap_or("auth")
-                .to_string(),
-        );
+        extras.push(auth.split_whitespace().next().unwrap_or("auth").to_string());
     }
 
     if status.starts_with("HTTP/") {
@@ -1798,7 +1880,8 @@ fn parse_http_json(body: &str, info: &mut ServiceInfo, extras: &mut Vec<String>)
         return;
     }
     // Kibana status
-    if trimmed.contains("\"kibana\"") || trimmed.contains("\"nodes\":") && trimmed.contains("kibana")
+    if trimmed.contains("\"kibana\"")
+        || trimmed.contains("\"nodes\":") && trimmed.contains("kibana")
     {
         info.product = "Kibana".into();
         if let Some(v) = probe::json_str(trimmed, "number") {
@@ -1809,7 +1892,11 @@ fn parse_http_json(body: &str, info: &mut ServiceInfo, extras: &mut Vec<String>)
     // Generic {"version": "x.y.z"} APIs.
     if info.product.is_empty() {
         if let Some(v) = probe::json_str(trimmed, "version") {
-            if v.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+            if v.chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false)
+            {
                 info.version = v;
                 info.product = "JSON API".into();
             }
@@ -1857,17 +1944,26 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("360wzws", "360 WangZhan httpd"),
     ("4d_webstar_s", "WebSTAR httpd"),
     ("ability server", "Code Crafters Ability httpd"),
-    ("adaptiveserveranywhere", "Sybase Adaptive Server Anywhere httpd"),
+    (
+        "adaptiveserveranywhere",
+        "Sybase Adaptive Server Anywhere httpd",
+    ),
     ("adh-web", "ADH-Web httpd"),
     ("agent-listenserver-httpsvr", "Network Associates ePO Agent"),
-    ("agent-listenserver-httpsvr/1", "Network Associates ePolicy Orchestrator"),
+    (
+        "agent-listenserver-httpsvr/1",
+        "Network Associates ePolicy Orchestrator",
+    ),
     ("agranat-emweb/r", "Agranat-EmWeb"),
     ("airdroid-g", "AirDroid httpd"),
     ("alexandrie", "GBConcept Alexandrie httpd"),
     ("allegroserve", "Franz Allegroserve httpd"),
     ("alpha-webserver", "ALPHA-WebServer"),
     ("alpha_webserv", "D-Link DIR-100 http config"),
-    ("alphanetworks,inc", "Western Digital WD TV Live media player http config"),
+    (
+        "alphanetworks,inc",
+        "Western Digital WD TV Live media player http config",
+    ),
     ("alt-n securitygateway", "ALT-N SecurityGateway httpd"),
     ("alvarion-webs", "Alvarion-Webs"),
     ("and-httpd", "and-httpd"),
@@ -1876,9 +1972,15 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("anti-web httpd", "Anti-Web httpd"),
     ("anweb", "AN httpd"),
     ("aos http server", "A2 httpd"),
-    ("ap http server", "Nortel Integrated Conference bridge http config"),
+    (
+        "ap http server",
+        "Nortel Integrated Conference bridge http config",
+    ),
     ("apache coyote", "Apache Tomcat (Coyote connector)"),
-    ("apache embedded server", "NewCS satellite card sharing system http config"),
+    (
+        "apache embedded server",
+        "NewCS satellite card sharing system http config",
+    ),
     ("apache netfile", "Ricoh Aficio IS200e scanner http config"),
     ("apache tomcat", "Apache Tomcat"),
     ("apache traffic server", "Apache Traffic Server"),
@@ -1887,7 +1989,10 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("app-webs", "Hikvision IP camera httpd"),
     ("aprisasr web server", "4RF Aprisa SR smart radio httpd"),
     ("apt-proxy", "Debian Apt-proxy"),
-    ("aquacontroller", "Neptune Systems AquaController aquarium monitor httpd"),
+    (
+        "aquacontroller",
+        "Neptune Systems AquaController aquarium monitor httpd",
+    ),
     ("arenasrv", "ArenaNet ArenaSrv game server"),
     ("asterisk", "Digium Asterisk AJAM"),
     ("atcom-ip-phone", "ATCOM VoIP phone web ui"),
@@ -1905,7 +2010,10 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("baseswitch 801fm", "Transtec BaseSwitch 801FM http config"),
     ("bcreport", "Blue Coat Reporter httpd"),
     ("big-ip", "F5 BIG-IP"),
-    ("bigfixhttpserver", "BigFix enterprise patch management httpd"),
+    (
+        "bigfixhttpserver",
+        "BigFix enterprise patch management httpd",
+    ),
     ("bigip", "F5 BIG-IP"),
     ("bisw_sdr", "Billion/TeleWell ADSL modem http config"),
     ("bitleaphttp", "Barracuda Backup 490 appliance http admin"),
@@ -1928,13 +2036,22 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("cl-http", "CL-HTTPd"),
     ("cloud connector", "SAP Cloud Connector"),
     ("cloudfront", "Amazon CloudFront httpd"),
-    ("cloudstack password server 4", "Apache CloudStack Password Server"),
+    (
+        "cloudstack password server 4",
+        "Apache CloudStack Password Server",
+    ),
     ("clxwifiserver", "DejaOffice Wi-Fi Sync"),
     ("cnix http server 1", "Siemens LOGO! 8 PLC httpd"),
     ("colib_async_http_server", "COLIB_ASYNC_HTTP_SERVER"),
     ("conexant-emweb/r", "Conexant-EmWeb"),
-    ("configurationservice", "Avaya Scopia Pathfinder firewall traversal http config"),
-    ("content gateway manager", "Websense Content Gateway Manager http config"),
+    (
+        "configurationservice",
+        "Avaya Scopia Pathfinder firewall traversal http config",
+    ),
+    (
+        "content gateway manager",
+        "Websense Content Gateway Manager http config",
+    ),
     ("cosminexus http server", "Hitachi Cosminexus httpd"),
     ("cosminexuscomponentcontainer", "Cosminexus httpd"),
     ("cougar", "Microsoft Windows Media Services"),
@@ -1953,7 +2070,10 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("desktopauthority", "ScriptLogic DesktopAuthority httpd"),
     ("dhost", "Novell eDirectory DHOST httpd"),
     ("digiweb", "Digitronic Digiweb httpd"),
-    ("distributed-net-proxy", "distributed.net personal key proxy httpd"),
+    (
+        "distributed-net-proxy",
+        "distributed.net personal key proxy httpd",
+    ),
     ("diva_httpd", "Eicon Diva ISDN card configuration server"),
     ("divawebconfig", "Dialogic Diva media board http config"),
     ("dnvrs-webs", "Hikvision Network Video Recorder http admin"),
@@ -1961,7 +2081,10 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("dot-tunes", "Dot.Tunes iTunes sharing httpd"),
     ("dph-140", "D-Link DPH-140 VoIP phone http config"),
     ("drwebav-deskserver", "Dr. Web AV-Desk httpd"),
-    ("drwebserver/rel-1000", "Dr.Web Enterprise Security Suite httpd"),
+    (
+        "drwebserver/rel-1000",
+        "Dr.Web Enterprise Security Suite httpd",
+    ),
     ("dt-umeshkal", "Seagull BarTender printer driver httpd"),
     ("dtv hmc-lite server", "DirecTV HMC-Lite"),
     ("dvrdvs-webs", "Hikvision DVR httpd"),
@@ -2004,7 +2127,10 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("gateway web server/1", "Mirasys WebClient server"),
     ("gemtekbaltichttpd", "Gemtek Systems GemtekBalticHTTPD"),
     ("geohttpserver", "GeoVision GeoHttpServer for webcams"),
-    ("gnat-box", "Global Technology Associates Gnat Box firewall http config"),
+    (
+        "gnat-box",
+        "Global Technology Associates Gnat Box firewall http config",
+    ),
     ("gnump3d2", "GNUMP3d streaming server"),
     ("goahead-http", "GoAhead WebServer"),
     ("goodreader for ipad", "Good.iWare WebDAV Server"),
@@ -2044,22 +2170,37 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("idsl mailgate", "MailGate web proxy"),
     ("iisguard", "Troxo IISGuard"),
     ("imail_monitor", "Ipswitch IMail Monitor web service"),
-    ("indigowebserver", "Perceptive Automation Indigo http config"),
+    (
+        "indigowebserver",
+        "Perceptive Automation Indigo http config",
+    ),
     ("inets/develop", "CouchDB REST httpd"),
     ("inkhttp", "Wirehog http transfer interface"),
     ("insight manager", "Compaq Insight Manager"),
     ("instart/nginx", "nginx"),
     ("integrity", "Hay Systems HSL 2.75G Femtocell http config"),
-    ("intellipoolhttpd", "Intellipool Network Monitor http config"),
+    (
+        "intellipoolhttpd",
+        "Intellipool Network Monitor http config",
+    ),
     ("interdialog", "Teckinfo InterDialog UCCS"),
     ("interlogix-webs", "Interlogix TruVision DVR web interface"),
-    ("internet firewall", "3Com OfficeConnect Firewall http config"),
+    (
+        "internet firewall",
+        "3Com OfficeConnect Firewall http config",
+    ),
     ("intrinsyc deviceweb", "Intermec CK31 http config"),
     ("iostreams", "Cisco IOS http config"),
-    ("ip speaker web interface", "Advanced Network Devices IP Speaker web interface"),
+    (
+        "ip speaker web interface",
+        "Advanced Network Devices IP Speaker web interface",
+    ),
     ("ip_sharer web", "IP_SHARER WEB"),
     ("ipc@chip", "Beck IPC@CHIP embedded httpd"),
-    ("ipcamera http/onvif/p2p/rtsp/vod multi-server", "DB Power IP Camera HTTP/ONVIF/P2P/RTSP/VOD multi-server"),
+    (
+        "ipcamera http/onvif/p2p/rtsp/vod multi-server",
+        "DB Power IP Camera HTTP/ONVIF/P2P/RTSP/VOD multi-server",
+    ),
     ("ipcamera-web", "Tenvis IP camera admin httpd"),
     ("ipl t s2", "Extron IPL T S2 http config"),
     ("ipmonitor", "MediaHouse ipMonitor httpd"),
@@ -2103,7 +2244,10 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("lucid-httpd", "LuCId-HTTPd"),
     ("lwip", "lwIP embedded httpd"),
     ("m1 webserver", "Bachmann M1 PLC httpd"),
-    ("macos_personal_websharing", "Mac OS X Personal Websharing httpd"),
+    (
+        "macos_personal_websharing",
+        "Mac OS X Personal Websharing httpd",
+    ),
     ("magic iradio", "AGK WiFi Internet radio http config"),
     ("majestic-12 webserver", "Majestic-12 httpd"),
     ("marimba-transmitter", "BMC/Marimba Transmitter"),
@@ -2121,9 +2265,15 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("micro_proxy", "acme.com micro_proxy http proxy"),
     ("microsoft-pws", "Microsoft Peer Web Services httpd"),
     ("microsoft-pws-95", "Microsoft Peer Web Services 95 httpd"),
-    ("microsoft-wince/5", "Kesseltronics car wash tunnel http config"),
+    (
+        "microsoft-wince/5",
+        "Kesseltronics car wash tunnel http config",
+    ),
     ("mineloadhttpd", "Mineload Bukkit plugin"),
-    ("miner web server", "Asicminer Block Eruptor Blade bitcoin miner httpd"),
+    (
+        "miner web server",
+        "Asicminer Block Eruptor Blade bitcoin miner httpd",
+    ),
     ("mini web server 1", "thttpd"),
     ("mini-http", "Kemp 2500 load balancer http config"),
     ("mini_httpd", "mini_httpd (embedded)"),
@@ -2135,7 +2285,10 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("mordac", "Bridgeworks iSCSI-to-SAS bridge http ui"),
     ("mortbay-jetty", "Jetty"),
     ("mpsconserver", "ZebraNet print server httpd"),
-    ("mqx http - freescale embedded web server", "Freescale MQX embedded httpd"),
+    (
+        "mqx http - freescale embedded web server",
+        "Freescale MQX embedded httpd",
+    ),
     ("mqx httpsrv", "Freescale MQX embedded httpd"),
     ("mrvl-r1_0", "HP LaserJet CP1205nw or P1606 http config"),
     ("mrvl-r2_0", "HP LaserJet Pro MFP config httpd"),
@@ -2146,7 +2299,10 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("mx4j-httpd/1", "MX4J HTTP Adaptor"),
     ("mystery webserver", "Espion Interceptor http proxy"),
     ("nae server", "Ingrian i3xx health monitor httpd"),
-    ("nae01", "Johnson Metasys building management system http interface"),
+    (
+        "nae01",
+        "Johnson Metasys building management system http interface",
+    ),
     ("nano httpd library", "Ferhat Ayaz's Nano httpd"),
     ("netcache", "NetApp NetCache http proxy"),
     ("netcache appliance", "NetApp NetCache http proxy"),
@@ -2158,22 +2314,37 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("netscape-commerce", "Netscape-Commerce httpd"),
     ("nettalk-webserver", "CapeSoft NetTalk WebServer"),
     ("netware http stack", "Novell NetWare HTTP Stack"),
-    ("netware-enterprise-web-server", "Novell NetWare enterprise web server"),
-    ("network camera with pan/tilt", "Vivotek Network Camera http config"),
+    (
+        "netware-enterprise-web-server",
+        "Novell NetWare enterprise web server",
+    ),
+    (
+        "network camera with pan/tilt",
+        "Vivotek Network Camera http config",
+    ),
     ("network_module/1", "Yamaha AV device httpd"),
     ("networkactiv-web-server", "NetworkActiv httpd"),
     ("nexg_httpd", "nexg_httpd"),
     ("ngams/v", "BaseHTTPServer"),
     ("ngconvert/6", "Exalead CloudView"),
     ("ngx_openresty", "OpenResty web app server"),
-    ("ni service locator", "National Instruments LabVIEW service locator httpd"),
+    (
+        "ni service locator",
+        "National Instruments LabVIEW service locator httpd",
+    ),
     ("noelios-restlet-engine", "Noelios Restlet Framework"),
     ("novell-agent", "Novell GroupWise Monitor"),
-    ("nt-ware-embeddedtcpserver-httpdevice", "NT-ware uniFLOW/MOM httpd"),
+    (
+        "nt-ware-embeddedtcpserver-httpdevice",
+        "NT-ware uniFLOW/MOM httpd",
+    ),
     ("nu-os", "Nu-OS"),
     ("octowebsvr/com", "SLWebMail Supervisor http config"),
     ("odn webserver", "Cisco ODN set-top box httpd"),
-    ("officescan client", "Trend Micro OfficeScan Antivirus http config"),
+    (
+        "officescan client",
+        "Trend Micro OfficeScan Antivirus http config",
+    ),
     ("openbmc", "OpenBMC baseboard controller httpd"),
     ("openlink-web-configurator", "OpenLink http config"),
     ("openvpn-as", "OpenVPN Access Server"),
@@ -2184,7 +2355,10 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("ows/1", "Canon varioPRINT or imagePRESS http ui"),
     ("pager enterprise", "Avtech PageR Enterprise http interface"),
     ("panweb server", "Palo Alto PanWeb httpd"),
-    ("pbps-sessionmanager", "BeyondTrust Password Safe session manager JSON API"),
+    (
+        "pbps-sessionmanager",
+        "BeyondTrust Password Safe session manager JSON API",
+    ),
     ("pcastd", "Buffalo Linkstation http config"),
     ("pdr-m800/1", "Sanyo M800 DVR http admin"),
     ("peerguardnf", "Phoenix Labs PeerGuardian httpd"),
@@ -2204,20 +2378,38 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("proxygen", "Facebook Proxygen httpd"),
     ("prtg/", "Indy httpd"),
     ("pulsarcoreembeddedplantserver/1", "ThinKnx web ui"),
-    ("puremessage web server", "Sophos PureMessage spam filter http interface"),
+    (
+        "puremessage web server",
+        "Sophos PureMessage spam filter http interface",
+    ),
     ("pve-api-daemon", "Proxmox Virtual Environment REST API"),
     ("rac_one_http", "Dell Embedded Remote Access card httpd"),
-    ("radia integration server", "HP Radia Integration Server httpd"),
+    (
+        "radia integration server",
+        "HP Radia Integration Server httpd",
+    ),
     ("radiamessagingservice", "HP SIM NVDKIT.exe http config"),
     ("radware-web-server", "Radware OnDemand switch http config"),
     ("raid httpserver", "Sun StorEdge 3511 http config"),
-    ("realtimes desktop service", "RealPlayer RealTimes Desktop Service"),
-    ("redback application server", "IBM RedBack Application Server SOAP"),
+    (
+        "realtimes desktop service",
+        "RealPlayer RealTimes Desktop Service",
+    ),
+    (
+        "redback application server",
+        "IBM RedBack Application Server SOAP",
+    ),
     ("redtitan-enterprisequeue", "RedTitan-eNterpriseQueue"),
     ("remote-potato", "Remote Potato media player"),
     ("resin", "Caucho Resin JSP engine"),
-    ("restlet-framework/@major-number@", "Serviio media server http status"),
-    ("roamabout switch manager services", "Enterasys RoamAbout Switch Manager http config"),
+    (
+        "restlet-framework/@major-number@",
+        "Serviio media server http status",
+    ),
+    (
+        "roamabout switch manager services",
+        "Enterasys RoamAbout Switch Manager http config",
+    ),
     ("salive", "Servers Alive network monitor"),
     ("sametime server", "IBM Lotus Sametime httpd"),
     ("sap-internet-sapdb-server", "SAP Internet DB httpd"),
@@ -2225,8 +2417,14 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("schneider-web/v", "Schneider-WEB"),
     ("securetransport", "Axway SecureTransport httpd"),
     ("security console", "Nexpose Security Console"),
-    ("sentinelkeysserver", "SafeNet Sentinel Keys License Monitor httpd"),
-    ("sentinelprotectionserver", "SafeNet Sentinel Protection Server"),
+    (
+        "sentinelkeysserver",
+        "SafeNet Sentinel Keys License Monitor httpd",
+    ),
+    (
+        "sentinelprotectionserver",
+        "SafeNet Sentinel Protection Server",
+    ),
     ("serv-u", "Rhinosoft Serv-U httpd"),
     ("server: paws", "Paws"),
     ("servletexecas", "New Atlanta ServletExec"),
@@ -2244,7 +2442,10 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("sky_router", "BSkyB router"),
     ("skyx https", "Packeteer SkyX Accellerator"),
     ("slinger", "Panasonic DVR slinger http config"),
-    ("smc internet update manager", "Avira SMC Internet Update Manager"),
+    (
+        "smc internet update manager",
+        "Avira SMC Internet Update Manager",
+    ),
     ("smssmtphttp", "Symantec smtp mail security http config"),
     ("snare", "InterSect Alliance SNARE httpd"),
     ("snare/1", "InterSect Alliance SNARE http config"),
@@ -2256,9 +2457,15 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("statistics server", "DeepMetrix Statistics Server"),
     ("stronghold", "Apache Stronghold httpd"),
     ("sun-ilom-web-server", "Sun Integrated Lights-Out httpd"),
-    ("sun-java-system-web-proxy-server", "Sun Java System Web Proxy http admin"),
+    (
+        "sun-java-system-web-proxy-server",
+        "Sun Java System Web Proxy http admin",
+    ),
     ("sun-java-system-web-server", "Sun Java System httpd"),
-    ("sun-java-system/web-services-pack-1", "Java Web Services Developer Pack"),
+    (
+        "sun-java-system/web-services-pack-1",
+        "Java Web Services Developer Pack",
+    ),
     ("sun_ray_admin_server", "SunRay http config"),
     ("svea_httpd", "svea_httpd"),
     ("sw-cp-server", "sw-cp-server httpd"),
@@ -2276,17 +2483,26 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("tomcat web server", "Apache Tomcat"),
     ("tp-link httpd/1", "TP-LINK embedded httpd"),
     ("tp-link smartplug", "TP-LINK Smart Plug fake_httpd"),
-    ("tr069 client cli server", "Alcatel-Lucent I-240W-A WAP TR069"),
+    (
+        "tr069 client cli server",
+        "Alcatel-Lucent I-240W-A WAP TR069",
+    ),
     ("tr069 http server", "TP-LINK TR-069 remote access"),
     ("traffic manager", "Apache Traffic Server"),
     ("trapeze-srv", "Trapeze-Srv"),
     ("twproxy", "ThunderWeb twproxy"),
     ("uc-httpd", "UC-HTTPd (Xiongmai/HiSilicon DVR)"),
     ("uclinux-httpd", "uClinux-httpd"),
-    ("ui-webserver", "UI-View Automatic Packet Reporting System httpd"),
+    (
+        "ui-webserver",
+        "UI-View Automatic Packet Reporting System httpd",
+    ),
     ("undefined", "McAfee ePolicy Orchestrator http interface"),
     ("unknown http server", "thttpd"),
-    ("unrealengine uweb web server build", "Unreal Tournament http admin"),
+    (
+        "unrealengine uweb web server build",
+        "Unreal Tournament http admin",
+    ),
     ("user agent web server", "Cisco ODN set-top box httpd"),
     ("vb150", "Canon WebView VB150 http config"),
     ("venky", "Smartfren EVDO modem httpd"),
@@ -2298,13 +2514,19 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("vistabox", "Convision Vistabox security camera http config"),
     ("vorlon sr", "Hummingbird Vorlon Servlet Runner"),
     ("vpl-jail-system", "Virtual Programming Lab for Moodle"),
-    ("vyktor xml winamp server", "Snowcrash WinAmp http control plugin"),
+    (
+        "vyktor xml winamp server",
+        "Snowcrash WinAmp http control plugin",
+    ),
     ("waitress", "Pylons Waitress WSGI server"),
     ("wanduck", "Asus wanduck WAN monitor httpd"),
     ("wasabi/1", "Equitrac Office EQCASService.exe"),
     ("wave world wide web server", "Brocade Wave httpd"),
     ("wdaemon", "World Client WDaemon httpd"),
-    ("web transaction server for clearpath mcp", "Unisys ClearPath MCP http config"),
+    (
+        "web transaction server for clearpath mcp",
+        "Unisys ClearPath MCP http config",
+    ),
     ("webpidginz", "WebPidgin-Z instant messaging interface"),
     ("websitepro", "O'Reilly WebSite Pro"),
     ("websnmp server httpd", "Apache WebSnmp module"),
@@ -2315,8 +2537,14 @@ pub(crate) const SERVER_ALIASES: &[(&str, &str)] = &[
     ("wgt_http", "wgt_http"),
     ("whc chatroom", "Fifi chat server http interface"),
     ("wifi-security-server", "Apache Tomcat"),
-    ("wireless network camera", "LevelOne WCS-2030 webcam http config"),
-    ("wireless network camera with pan/tilt", "Vivotek Network Camera http config"),
+    (
+        "wireless network camera",
+        "LevelOne WCS-2030 webcam http config",
+    ),
+    (
+        "wireless network camera with pan/tilt",
+        "Vivotek Network Camera http config",
+    ),
     ("wso2 carbon server", "WS02 Carbon middleware"),
     ("wstl cpe", "Westell cable modem http config"),
     ("wstl cpe 1", "Westell broadband router TR-069"),
@@ -2428,7 +2656,10 @@ pub(crate) const SSH_SOFTWARE: &[(&str, &str)] = &[
     ("ovh-rescue", "OpenSSH"),
     ("plan9", "Plan 9 sshd"),
     ("pragma fortressssh", "Pragma Fortress SSH Server"),
-    ("process software multinet", "WRQ Reflection for Secure IT sshd"),
+    (
+        "process software multinet",
+        "WRQ Reflection for Secure IT sshd",
+    ),
     ("reflectionforsecureit", "WRQ Reflection for Secure IT sshd"),
     ("romclisecure", "Adtran Netvanta RomCliSecure sshd"),
     ("romsshell", "AllegroSoft RomSShell sshd"),
@@ -2443,7 +2674,10 @@ pub(crate) const SSH_SOFTWARE: &[(&str, &str)] = &[
     ("solidfire element", "OpenSSH"),
     ("srtsshserver", "South River Titan sftpd"),
     ("ssh compatible ser", "SCS NetScreen sshd"),
-    ("ssh server - sshd", "SSHelper sshd (com.arachnoid.sshelper)"),
+    (
+        "ssh server - sshd",
+        "SSHelper sshd (com.arachnoid.sshelper)",
+    ),
     ("ssh-1.5-by-ice_4_all", "ICE_4_All backdoor sshd"),
     ("ssh-1.5-ssh.0.1", "Dell PowerConnect sshd"),
     ("ssh-1.99-interopsecshell", "InteropSystems SSH"),
@@ -2452,7 +2686,10 @@ pub(crate) const SSH_SOFTWARE: &[(&str, &str)] = &[
     ("ssh-2.0-apssh", "APSSHd"),
     ("ssh-2.0-cisco_wlc", "Cisco WLC sshd"),
     ("ssh-2.0-mpssh", "HP Integrated Lights-Out mpSSH"),
-    ("ssh-2.0-pbps-sm-1.0.0", "BeyondTrust Password Safe session manager"),
+    (
+        "ssh-2.0-pbps-sm-1.0.0",
+        "BeyondTrust Password Safe session manager",
+    ),
     ("ssh-2.0-pgp", "PGP Universal sshd"),
     ("ssh-2.0-twisted", "Kojoney SSH honeypot"),
     ("ssh-2.0-unknown", "Allot Netenforcer OpenSSH"),
@@ -2546,7 +2783,10 @@ pub(crate) const APP_MARKERS: &[(&str, &str)] = &[
     ("realm=\"opensearch security\"", "OpenSearch"),
     ("realm=\"ip webcam\"", "IP Webcam"),
     ("realm=\"ascotel domain\"", "Aastra Ascotel PBX"),
-    ("realm=\"securityspy web server\"", "SecuritySpy video server"),
+    (
+        "realm=\"securityspy web server\"",
+        "SecuritySpy video server",
+    ),
     ("realm=\"fhem: login required\"", "FHEM home automation"),
     ("realm=\"sapbc\"", "SAP Business Connector"),
     ("x-jenkins", "Jenkins"),
@@ -3060,7 +3300,10 @@ fn readable(s: &str) -> Option<String> {
     if total == 0 {
         return None;
     }
-    let printable = s.chars().filter(|c| c.is_ascii_graphic() || *c == ' ').count();
+    let printable = s
+        .chars()
+        .filter(|c| c.is_ascii_graphic() || *c == ' ')
+        .count();
     if printable * 5 < total * 4 {
         return None;
     }
@@ -3189,7 +3432,12 @@ mod tests {
         body.extend_from_slice(plugin.as_bytes());
         body.push(0);
         let len = body.len();
-        let mut pkt = vec![(len & 0xff) as u8, ((len >> 8) & 0xff) as u8, ((len >> 16) & 0xff) as u8, 0];
+        let mut pkt = vec![
+            (len & 0xff) as u8,
+            ((len >> 8) & 0xff) as u8,
+            ((len >> 16) & 0xff) as u8,
+            0,
+        ];
         pkt.extend_from_slice(&body);
         pkt
     }
@@ -3197,7 +3445,11 @@ mod tests {
     fn detect_mysql(version: &str) -> ServiceInfo {
         let mut info = ServiceInfo::default();
         // 0x0800 is CLIENT_SSL; every modern build offers it.
-        parse_banner(3306, &mysql_handshake(version, "caching_sha2_password", 0x0800, 255), &mut info);
+        parse_banner(
+            3306,
+            &mysql_handshake(version, "caching_sha2_password", 0x0800, 255),
+            &mut info,
+        );
         info
     }
 
@@ -3209,9 +3461,17 @@ mod tests {
         assert_eq!(info.name, "mysql");
         assert_eq!(info.product, "MySQL");
         assert_eq!(info.version, "8.0.35");
-        assert!(info.extra.contains("8.0 EOL since Apr 2026"), "{}", info.extra);
+        assert!(
+            info.extra.contains("8.0 EOL since Apr 2026"),
+            "{}",
+            info.extra
+        );
         assert!(info.extra.contains("0ubuntu0.22.04.1"), "{}", info.extra);
-        assert!(info.extra.contains("caching_sha2_password"), "{}", info.extra);
+        assert!(
+            info.extra.contains("caching_sha2_password"),
+            "{}",
+            info.extra
+        );
         assert!(info.extra.contains("TLS supported"), "{}", info.extra);
         assert_eq!(info.os_hint, "Linux (Ubuntu)");
     }
@@ -3263,7 +3523,11 @@ mod tests {
     fn an_end_of_life_branch_is_called_out() {
         let old = detect_mysql("5.6.51-log");
         assert_eq!(old.version, "5.6.51");
-        assert!(old.extra.contains("5.6 EOL since Feb 2021"), "{}", old.extra);
+        assert!(
+            old.extra.contains("5.6 EOL since Feb 2021"),
+            "{}",
+            old.extra
+        );
         let lts = detect_mysql("8.4.2");
         assert!(lts.extra.contains("8.4 LTS"), "{}", lts.extra);
     }
@@ -3271,7 +3535,11 @@ mod tests {
     #[test]
     fn a_server_without_ssl_says_so() {
         let mut info = ServiceInfo::default();
-        parse_banner(3306, &mysql_handshake("5.7.44-log", "mysql_native_password", 0x0000, 8), &mut info);
+        parse_banner(
+            3306,
+            &mysql_handshake("5.7.44-log", "mysql_native_password", 0x0000, 8),
+            &mut info,
+        );
         assert_eq!(info.version, "5.7.44");
         assert!(info.extra.contains("no TLS offered"), "{}", info.extra);
         assert!(info.extra.contains("latin1_swedish_ci"), "{}", info.extra);
@@ -3287,13 +3555,20 @@ mod tests {
         let mut info = ServiceInfo::default();
         assert!(parse_mysql(&pkt, &mut info));
         assert_eq!(info.product, "MariaDB");
-        assert!(info.extra.contains("host not allowed to connect"), "{}", info.extra);
+        assert!(
+            info.extra.contains("host not allowed to connect"),
+            "{}",
+            info.extra
+        );
     }
 
     #[test]
     fn a_non_mysql_binary_greeting_is_not_claimed() {
         let mut info = ServiceInfo::default();
-        assert!(!parse_mysql(&[0x10, 0x00, 0x00, 0x00, 0x33, 0x99, 0x01], &mut info));
+        assert!(!parse_mysql(
+            &[0x10, 0x00, 0x00, 0x00, 0x33, 0x99, 0x01],
+            &mut info
+        ));
         assert!(info.product.is_empty());
     }
 
@@ -3306,8 +3581,14 @@ mod tests {
                 needle.to_ascii_lowercase(),
                 "MYSQL_FLAVORS key {needle:?} ({product}) has upper case and can never match"
             );
-            assert!(needle.len() >= 4, "MYSQL_FLAVORS key {needle:?} is too short to anchor on");
-            assert!(seen.insert(*needle), "MYSQL_FLAVORS key {needle:?} appears twice");
+            assert!(
+                needle.len() >= 4,
+                "MYSQL_FLAVORS key {needle:?} is too short to anchor on"
+            );
+            assert!(
+                seen.insert(*needle),
+                "MYSQL_FLAVORS key {needle:?} appears twice"
+            );
             assert!(
                 own.is_empty() || needle.contains(own) || own.len() >= 4,
                 "MYSQL_FLAVORS marker {own:?} is too short to anchor on"
@@ -3328,7 +3609,10 @@ mod tests {
                 needle.to_ascii_lowercase(),
                 "APP_MARKERS key {needle:?} ({label}) has upper case and can never match"
             );
-            assert!(seen.insert(*needle), "APP_MARKERS key {needle:?} appears twice");
+            assert!(
+                seen.insert(*needle),
+                "APP_MARKERS key {needle:?} appears twice"
+            );
         }
         let mut seen = std::collections::HashSet::new();
         for (key, product) in SERVER_ALIASES {
@@ -3337,8 +3621,14 @@ mod tests {
                 key.to_ascii_lowercase(),
                 "SERVER_ALIASES key {key:?} ({product}) has upper case and can never match"
             );
-            assert!(seen.insert(*key), "SERVER_ALIASES key {key:?} appears twice");
-            assert!(key.len() >= 4, "SERVER_ALIASES key {key:?} is too short to anchor on");
+            assert!(
+                seen.insert(*key),
+                "SERVER_ALIASES key {key:?} appears twice"
+            );
+            assert!(
+                key.len() >= 4,
+                "SERVER_ALIASES key {key:?} is too short to anchor on"
+            );
         }
         let mut seen = std::collections::HashSet::new();
         for (needle, label) in SSH_SOFTWARE {
@@ -3347,7 +3637,10 @@ mod tests {
                 needle.to_ascii_lowercase(),
                 "SSH_SOFTWARE key {needle:?} ({label}) has upper case and can never match"
             );
-            assert!(seen.insert(*needle), "SSH_SOFTWARE key {needle:?} appears twice");
+            assert!(
+                seen.insert(*needle),
+                "SSH_SOFTWARE key {needle:?} appears twice"
+            );
         }
     }
 
@@ -3380,7 +3673,11 @@ mod tests {
             ("lighttpd/1.4.69", "lighttpd", "1.4.69"),
             ("openresty/1.21.4.1", "openresty", "1.21.4.1"),
             ("WebSphere Application Server/8.5", "WebSphere", "8.5"),
-            ("GlassFish Server Open Source Edition 4.1", "GlassFish", "4.1"),
+            (
+                "GlassFish Server Open Source Edition 4.1",
+                "GlassFish",
+                "4.1",
+            ),
             ("TornadoServer/6.2", "TornadoServer", "6.2"),
             ("Jetty(9.4.44.v20210927)", "Jetty", "9.4.44.v20210927"),
             ("MiniServ/1.890", "MiniServ", "1.890"),
@@ -3397,11 +3694,23 @@ mod tests {
     #[test]
     fn server_aliases_name_what_the_head_token_hides() {
         for (header, product, version) in [
-            ("Apache-Coyote/1.1", "Apache Tomcat (Coyote connector)", "1.1"),
+            (
+                "Apache-Coyote/1.1",
+                "Apache Tomcat (Coyote connector)",
+                "1.1",
+            ),
             ("Apache Tomcat/9.0.85", "Apache Tomcat", "9.0.85"),
             ("App-webs/", "Hikvision IP camera httpd", ""),
-            ("Cougar/9.01.01.5001", "Microsoft Windows Media Services", "9.01.01.5001"),
-            ("uc-httpd 1.0.0", "UC-HTTPd (Xiongmai/HiSilicon DVR)", "1.0.0"),
+            (
+                "Cougar/9.01.01.5001",
+                "Microsoft Windows Media Services",
+                "9.01.01.5001",
+            ),
+            (
+                "uc-httpd 1.0.0",
+                "UC-HTTPd (Xiongmai/HiSilicon DVR)",
+                "1.0.0",
+            ),
             ("BigIP", "F5 BIG-IP", ""),
             ("cpsrvd/11.52.3.2", "cPanel httpd", "11.52.3.2"),
         ] {
@@ -3459,10 +3768,17 @@ mod tests {
             ("220 ProFTPD 1.3.5 Server (Debian)\r\n", "ProFTPD"),
             ("220 NcFTPd Server (licensed copy) ready.\r\n", "NcFTPd"),
             ("220 Wing FTP Server ready...\r\n", "Wing FTP"),
-            ("220 Serv-U FTP Server v6.4 for WinSock ready.\r\n", "Serv-U"),
+            (
+                "220 Serv-U FTP Server v6.4 for WinSock ready.\r\n",
+                "Serv-U",
+            ),
             ("220 TYPSoft FTP Server 1.10 ready...\r\n", "TYPSoft"),
         ] {
-            assert_eq!(detect_line(21, banner).product, product, "banner: {banner:?}");
+            assert_eq!(
+                detect_line(21, banner).product,
+                product,
+                "banner: {banner:?}"
+            );
         }
     }
 
@@ -3470,12 +3786,19 @@ mod tests {
     fn mail_greetings_name_their_server() {
         for (banner, product) in [
             ("220 mail.example.com ESMTP Postfix (Ubuntu)\r\n", "Postfix"),
-            ("220 mail ESMTP CommuniGate Pro 6.1.11 is glad to see you!\r\n", "CommuniGate Pro"),
+            (
+                "220 mail ESMTP CommuniGate Pro 6.1.11 is glad to see you!\r\n",
+                "CommuniGate Pro",
+            ),
             ("220 mail ESMTP MDaemon 15.0.3 ready\r\n", "Mdaemon"),
             ("220 host ESMTP IceWarp 12.0.1 ready\r\n", "IceWarp"),
             ("220 srv ESMTP XMail 1.27 ESMTP Server\r\n", "XMail"),
         ] {
-            assert_eq!(detect_line(25, banner).product, product, "banner: {banner:?}");
+            assert_eq!(
+                detect_line(25, banner).product,
+                product,
+                "banner: {banner:?}"
+            );
         }
     }
 

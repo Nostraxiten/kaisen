@@ -13,20 +13,87 @@ use crate::util::output::Painter;
 /// by popular mail providers.
 const DKIM_SELECTORS: &[&str] = &[
     // Generic and self-hosted conventions.
-    "default", "dkim", "mail", "smtp", "key1", "key2", "s1", "s2", "s1024", "s2048",
-    "selector", "selector1", "selector2", "k1", "k2", "k3", "dkim1", "dkim2",
-    "mx", "email", "10", "20", "2020", "2021", "2022", "2023", "2024", "2025",
+    "default",
+    "dkim",
+    "mail",
+    "smtp",
+    "key1",
+    "key2",
+    "s1",
+    "s2",
+    "s1024",
+    "s2048",
+    "selector",
+    "selector1",
+    "selector2",
+    "k1",
+    "k2",
+    "k3",
+    "dkim1",
+    "dkim2",
+    "mx",
+    "email",
+    "10",
+    "20",
+    "2020",
+    "2021",
+    "2022",
+    "2023",
+    "2024",
+    "2025",
     // Google Workspace and Microsoft 365.
-    "google", "20161025", "20210112", "20230601",
+    "google",
+    "20161025",
+    "20210112",
+    "20230601",
     // Common SaaS senders.
-    "mandrill", "mailjet", "sendgrid", "s1._domainkey", "sparkpost", "scph0819",
-    "amazonses", "ses", "postmark", "pm", "mailchimp", "mc1", "mc2", "cm",
-    "sendinblue", "sib", "klaviyo", "hs1", "hs2", "hubspot", "zendesk1",
-    "zendesk2", "freshdesk", "intercom", "mixmax", "front", "helpscout",
+    "mandrill",
+    "mailjet",
+    "sendgrid",
+    "s1._domainkey",
+    "sparkpost",
+    "scph0819",
+    "amazonses",
+    "ses",
+    "postmark",
+    "pm",
+    "mailchimp",
+    "mc1",
+    "mc2",
+    "cm",
+    "sendinblue",
+    "sib",
+    "klaviyo",
+    "hs1",
+    "hs2",
+    "hubspot",
+    "zendesk1",
+    "zendesk2",
+    "freshdesk",
+    "intercom",
+    "mixmax",
+    "front",
+    "helpscout",
     // Mailbox providers.
-    "protonmail", "protonmail2", "protonmail3", "fm1", "fm2", "fm3", "zoho",
-    "zohomail", "yandex", "mail-ru", "titan1", "titan2", "migadu",
-    "everlytickey1", "everlytickey2", "mxvault", "dyn", "ctct1", "ctct2",
+    "protonmail",
+    "protonmail2",
+    "protonmail3",
+    "fm1",
+    "fm2",
+    "fm3",
+    "zoho",
+    "zohomail",
+    "yandex",
+    "mail-ru",
+    "titan1",
+    "titan2",
+    "migadu",
+    "everlytickey1",
+    "everlytickey2",
+    "mxvault",
+    "dyn",
+    "ctct1",
+    "ctct2",
 ];
 
 #[derive(Clone, Copy)]
@@ -122,7 +189,9 @@ async fn spf_lookup_count(
                 count += sub;
                 notes.extend(sub_notes);
             } else if !domain.contains('%') {
-                notes.push(format!("include:{domain} has no SPF record (evaluates to PERMERROR)"));
+                notes.push(format!(
+                    "include:{domain} has no SPF record (evaluates to PERMERROR)"
+                ));
             }
         }
     }
@@ -135,17 +204,17 @@ async fn spf_lookup_count(
 async fn probe_mx(host: &str, timeout_ms: u64) -> Option<(String, bool, Vec<String>)> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let dur = std::time::Duration::from_millis(timeout_ms.max(3000));
-    let addr = tokio::net::lookup_host((host, 25))
-        .await
-        .ok()?
-        .next()?;
+    let addr = tokio::net::lookup_host((host, 25)).await.ok()?.next()?;
     let mut stream = tokio::time::timeout(dur, tokio::net::TcpStream::connect(addr))
         .await
         .ok()?
         .ok()?;
 
     let mut buf = vec![0u8; 4096];
-    let n = tokio::time::timeout(dur, stream.read(&mut buf)).await.ok()?.ok()?;
+    let n = tokio::time::timeout(dur, stream.read(&mut buf))
+        .await
+        .ok()?
+        .ok()?;
     let banner = String::from_utf8_lossy(&buf[..n])
         .lines()
         .next()
@@ -176,7 +245,15 @@ async fn probe_mx(host: &str, timeout_ms: u64) -> Option<(String, bool, Vec<Stri
     let upper = ehlo.to_ascii_uppercase();
     let starttls = upper.contains("STARTTLS");
     let mut caps = Vec::new();
-    for cap in ["STARTTLS", "AUTH", "8BITMIME", "SMTPUTF8", "PIPELINING", "DSN", "CHUNKING"] {
+    for cap in [
+        "STARTTLS",
+        "AUTH",
+        "8BITMIME",
+        "SMTPUTF8",
+        "PIPELINING",
+        "DSN",
+        "CHUNKING",
+    ] {
         if upper.contains(cap) {
             caps.push(cap.to_string());
         }
@@ -272,7 +349,9 @@ pub async fn audit(domain: &str, server: SocketAddr, timeout_ms: u64, color: boo
 
     // ── SPF (TXT apex, v=spf1) ───────────────────────────────────────────────
     let txts = txt_lookup(server, domain, timeout_ms).await;
-    let spf = txts.iter().find(|t| t.to_ascii_lowercase().starts_with("v=spf1"));
+    let spf = txts
+        .iter()
+        .find(|t| t.to_ascii_lowercase().starts_with("v=spf1"));
     match spf {
         Some(rec) => {
             let low = rec.to_ascii_lowercase();
@@ -281,9 +360,15 @@ pub async fn audit(domain: &str, server: SocketAddr, timeout_ms: u64, color: boo
             } else if low.contains("~all") {
                 (Mark::Ok, "softfail (~all): acceptable")
             } else if low.contains("?all") {
-                (Mark::Warn, "neutral (?all): weak — spoofing not discouraged")
+                (
+                    Mark::Warn,
+                    "neutral (?all): weak — spoofing not discouraged",
+                )
             } else if low.contains("+all") {
-                (Mark::Bad, "pass-all (+all): anyone may send as you — misconfigured")
+                (
+                    Mark::Bad,
+                    "pass-all (+all): anyone may send as you — misconfigured",
+                )
             } else {
                 (Mark::Warn, "no explicit all mechanism")
             };
@@ -298,8 +383,7 @@ pub async fn audit(domain: &str, server: SocketAddr, timeout_ms: u64, color: boo
             // The RFC 7208 ten-lookup budget. Nothing in the record shows when
             // it has been blown, but evaluation returns PERMERROR when it has.
             let mut seen = Vec::new();
-            let (lookups, notes) =
-                spf_lookup_count(server, rec, timeout_ms, 0, &mut seen).await;
+            let (lookups, notes) = spf_lookup_count(server, rec, timeout_ms, 0, &mut seen).await;
             if lookups > 10 {
                 println!(
                     "{}{:<9} {} DNS lookups — over the RFC 7208 limit of 10, so SPF returns PERMERROR",
@@ -346,7 +430,11 @@ pub async fn audit(domain: &str, server: SocketAddr, timeout_ms: u64, color: boo
                 "{}{:<9} no SPF record{}",
                 mark(&p, m),
                 "SPF",
-                if has_mail { " — senders can't be validated" } else { " (no mail expected)" }
+                if has_mail {
+                    " — senders can't be validated"
+                } else {
+                    " (no mail expected)"
+                }
             );
             if has_mail {
                 fails += 1;
@@ -431,7 +519,11 @@ pub async fn audit(domain: &str, server: SocketAddr, timeout_ms: u64, color: boo
                 "{}{:<9} no DMARC record{}",
                 mark(&p, m),
                 "DMARC",
-                if has_mail { " — domain is spoofable" } else { " (no mail expected)" }
+                if has_mail {
+                    " — domain is spoofable"
+                } else {
+                    " (no mail expected)"
+                }
             );
             if has_mail {
                 fails += 1;
@@ -508,8 +600,15 @@ pub async fn audit(domain: &str, server: SocketAddr, timeout_ms: u64, color: boo
 
     // ── MTA-STS & TLS-RPT ────────────────────────────────────────────────────
     let mta = txt_lookup(server, &format!("_mta-sts.{domain}"), timeout_ms).await;
-    if mta.iter().any(|t| t.to_ascii_lowercase().contains("v=stsv1")) {
-        println!("{}{:<9} enabled (enforces TLS for inbound mail)", mark(&p, Mark::Ok), "MTA-STS");
+    if mta
+        .iter()
+        .any(|t| t.to_ascii_lowercase().contains("v=stsv1"))
+    {
+        println!(
+            "{}{:<9} enabled (enforces TLS for inbound mail)",
+            mark(&p, Mark::Ok),
+            "MTA-STS"
+        );
         passed += 1;
     } else if has_mail {
         println!("{}{:<9} not configured", mark(&p, Mark::Warn), "MTA-STS");
@@ -517,8 +616,15 @@ pub async fn audit(domain: &str, server: SocketAddr, timeout_ms: u64, color: boo
     }
 
     let tlsrpt = txt_lookup(server, &format!("_smtp._tls.{domain}"), timeout_ms).await;
-    if tlsrpt.iter().any(|t| t.to_ascii_lowercase().contains("v=tlsrptv1")) {
-        println!("{}{:<9} enabled (TLS failure reporting)", mark(&p, Mark::Ok), "TLS-RPT");
+    if tlsrpt
+        .iter()
+        .any(|t| t.to_ascii_lowercase().contains("v=tlsrptv1"))
+    {
+        println!(
+            "{}{:<9} enabled (TLS failure reporting)",
+            mark(&p, Mark::Ok),
+            "TLS-RPT"
+        );
         passed += 1;
     } else if has_mail && verbosity >= 1 {
         println!("{}{:<9} not configured", mark(&p, Mark::Info), "TLS-RPT");
@@ -531,7 +637,11 @@ pub async fn audit(domain: &str, server: SocketAddr, timeout_ms: u64, color: boo
             .take(4)
             .map(|mx| async move { (mx.clone(), dane_for_mx(server, mx, timeout_ms).await) });
         let results = futures::future::join_all(checks).await;
-        let with_dane: Vec<&String> = results.iter().filter(|(_, n)| *n > 0).map(|(m, _)| m).collect();
+        let with_dane: Vec<&String> = results
+            .iter()
+            .filter(|(_, n)| *n > 0)
+            .map(|(m, _)| m)
+            .collect();
         if with_dane.len() == results.len() {
             println!(
                 "{}{:<9} TLSA records on every MX — senders can detect a downgraded or substituted certificate",
@@ -544,7 +654,11 @@ pub async fn audit(domain: &str, server: SocketAddr, timeout_ms: u64, color: boo
                 "{}{:<9} TLSA on only some MX hosts ({}) — partial DANE is not enforced",
                 mark(&p, Mark::Warn),
                 "DANE",
-                with_dane.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                with_dane
+                    .iter()
+                    .map(|s| s.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             );
             warnings += 1;
         } else if verbosity >= 1 {
@@ -612,13 +726,20 @@ pub async fn audit(domain: &str, server: SocketAddr, timeout_ms: u64, color: boo
 
     // ── BIMI (brand indicators; requires DMARC enforcement) ──────────────────
     let bimi = txt_lookup(server, &format!("default._bimi.{domain}"), timeout_ms).await;
-    if let Some(rec) = bimi.iter().find(|t| t.to_ascii_lowercase().contains("v=bimi1")) {
+    if let Some(rec) = bimi
+        .iter()
+        .find(|t| t.to_ascii_lowercase().contains("v=bimi1"))
+    {
         let has_vmc = rec.to_ascii_lowercase().contains("a=");
         println!(
             "{}{:<9} published{}",
             mark(&p, Mark::Ok),
             "BIMI",
-            if has_vmc { " with a verified mark certificate" } else { " (logo only, no VMC)" }
+            if has_vmc {
+                " with a verified mark certificate"
+            } else {
+                " (logo only, no VMC)"
+            }
         );
         passed += 1;
     } else if has_mail && verbosity >= 1 {

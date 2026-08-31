@@ -94,7 +94,13 @@ fn be16(b: &[u8], i: usize) -> u16 {
 /// Split an HTTP response into (status code, body).
 fn parse_http(raw: &[u8]) -> Option<(u16, String)> {
     let text = String::from_utf8_lossy(raw);
-    let code: u16 = text.lines().next()?.split_whitespace().nth(1)?.parse().ok()?;
+    let code: u16 = text
+        .lines()
+        .next()?
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()?;
     let body = text
         .split_once("\r\n\r\n")
         .map(|(_, b)| b.to_string())
@@ -134,8 +140,12 @@ pub async fn https_get(
     let ms = (dur.as_millis() as u64).max(3000);
     let stream = timeout(dur, TcpStream::connect(addr)).await.ok()?.ok()?;
     crate::util::netutil::reset_on_close(&stream);
-    let mut tls = crate::tls::tls13::handshake(stream, sni, &["http/1.1"], ms).await.ok()?;
-    tls.write(http_get_request(sni, path).as_bytes(), ms).await.ok()?;
+    let mut tls = crate::tls::tls13::handshake(stream, sni, &["http/1.1"], ms)
+        .await
+        .ok()?;
+    tls.write(http_get_request(sni, path).as_bytes(), ms)
+        .await
+        .ok()?;
     let mut raw = Vec::new();
     for _ in 0..8 {
         match tls.read(0, ms).await {
@@ -191,7 +201,10 @@ fn le16(b: &[u8], i: usize) -> u16 {
 
 fn be32(b: &[u8], i: usize) -> u32 {
     if i + 4 <= b.len() {
-        ((b[i] as u32) << 24) | ((b[i + 1] as u32) << 16) | ((b[i + 2] as u32) << 8) | b[i + 3] as u32
+        ((b[i] as u32) << 24)
+            | ((b[i + 1] as u32) << 16)
+            | ((b[i + 2] as u32) << 8)
+            | b[i + 3] as u32
     } else {
         0
     }
@@ -199,7 +212,10 @@ fn be32(b: &[u8], i: usize) -> u32 {
 
 fn le32(b: &[u8], i: usize) -> u32 {
     if i + 4 <= b.len() {
-        ((b[i + 3] as u32) << 24) | ((b[i + 2] as u32) << 16) | ((b[i + 1] as u32) << 8) | b[i] as u32
+        ((b[i + 3] as u32) << 24)
+            | ((b[i + 2] as u32) << 16)
+            | ((b[i + 1] as u32) << 8)
+            | b[i] as u32
     } else {
         0
     }
@@ -208,7 +224,13 @@ fn le32(b: &[u8], i: usize) -> u32 {
 /// Printable-ASCII view of a binary blob, for loose keyword scans.
 fn ascii(b: &[u8]) -> String {
     b.iter()
-        .map(|&c| if (0x20..0x7f).contains(&c) { c as char } else { ' ' })
+        .map(|&c| {
+            if (0x20..0x7f).contains(&c) {
+                c as char
+            } else {
+                ' '
+            }
+        })
         .collect()
 }
 
@@ -301,7 +323,11 @@ pub async fn smb(stream: &mut TcpStream, port: u16, dur: Duration) -> Option<Pro
     let dialect = le16(&resp, 4 + 64 + 4);
     let (ver, os) = smb_dialect(dialect);
     let mut p = Probed {
-        name: if port == 445 { "microsoft-ds" } else { "netbios-ssn" },
+        name: if port == 445 {
+            "microsoft-ds"
+        } else {
+            "netbios-ssn"
+        },
         product: "SMB".into(),
         version: ver.to_string(),
         os_hint: os.to_string(),
@@ -410,8 +436,18 @@ pub async fn mssql(stream: &mut TcpStream, dur: Duration) -> Option<Probed> {
     if version.is_empty() {
         return Some(Probed::named("ms-sql-s", "Microsoft SQL Server"));
     }
-    let major: u32 = version.split('.').next().unwrap_or("0").parse().unwrap_or(0);
-    let minor: u32 = version.split('.').nth(1).unwrap_or("0").parse().unwrap_or(0);
+    let major: u32 = version
+        .split('.')
+        .next()
+        .unwrap_or("0")
+        .parse()
+        .unwrap_or(0);
+    let minor: u32 = version
+        .split('.')
+        .nth(1)
+        .unwrap_or("0")
+        .parse()
+        .unwrap_or(0);
     let release = mssql_release(major, minor);
     let mut extra = String::new();
     if !release.is_empty() {
@@ -641,7 +677,9 @@ fn bson_str(doc: &[u8], key: &str) -> Option<String> {
             let len = le32(doc, at) as usize;
             let start = at + 4;
             if len >= 1 && start + len <= doc.len() {
-                let s = String::from_utf8_lossy(&doc[start..start + len - 1]).trim().to_string();
+                let s = String::from_utf8_lossy(&doc[start..start + len - 1])
+                    .trim()
+                    .to_string();
                 if !s.is_empty() {
                     return Some(s);
                 }
@@ -797,7 +835,9 @@ fn amqp_field(buf: &[u8], key: &[u8]) -> Option<String> {
     let mut needle = Vec::with_capacity(key.len() + 1);
     needle.push(key.len() as u8);
     needle.extend_from_slice(key);
-    let pos = buf.windows(needle.len()).position(|w| w == needle.as_slice())?;
+    let pos = buf
+        .windows(needle.len())
+        .position(|w| w == needle.as_slice())?;
     let i = pos + needle.len();
     if buf.get(i) != Some(&b'S') {
         return None;
@@ -807,7 +847,9 @@ fn amqp_field(buf: &[u8], key: &[u8]) -> Option<String> {
     if len == 0 || len > 256 || start + len > buf.len() {
         return None;
     }
-    let s = String::from_utf8_lossy(&buf[start..start + len]).trim().to_string();
+    let s = String::from_utf8_lossy(&buf[start..start + len])
+        .trim()
+        .to_string();
     if s.is_empty() {
         None
     } else {
@@ -866,7 +908,7 @@ pub async fn dns_version(stream: &mut TcpStream, dur: Duration) -> Option<Probed
         i += l + 1;
     }
     i += 5; // root label + qtype + qclass
-    // Answer: name, type, class, ttl, rdlength, rdata.
+            // Answer: name, type, class, ttl, rdlength, rdata.
     if i + 2 <= body.len() && body[i] & 0xc0 == 0xc0 {
         i += 2;
     } else {
@@ -889,7 +931,9 @@ pub async fn dns_version(stream: &mut TcpStream, dur: Duration) -> Option<Probed
     if start + txt_len > body.len() {
         return Some(p);
     }
-    let text = String::from_utf8_lossy(&body[start..start + txt_len]).trim().to_string();
+    let text = String::from_utf8_lossy(&body[start..start + txt_len])
+        .trim()
+        .to_string();
     p.banner = text.clone();
     let lower = text.to_ascii_lowercase();
     let product = if lower.contains("dnsmasq") {
@@ -913,7 +957,10 @@ pub async fn dns_version(stream: &mut TcpStream, dur: Duration) -> Option<Probed
     p.version = first_version(&text);
     if p.version.is_empty() {
         p.extra = text;
-    } else if let Some(rest) = text.split_once(&p.version).map(|(_, r)| r.trim().to_string()) {
+    } else if let Some(rest) = text
+        .split_once(&p.version)
+        .map(|(_, r)| r.trim().to_string())
+    {
         if !rest.is_empty() {
             p.extra = rest;
         }
@@ -923,7 +970,12 @@ pub async fn dns_version(stream: &mut TcpStream, dur: Duration) -> Option<Probed
 
 // ── Minecraft (Server List Ping) ────────────────────────────────────────────
 
-pub async fn minecraft(stream: &mut TcpStream, host: &str, port: u16, dur: Duration) -> Option<Probed> {
+pub async fn minecraft(
+    stream: &mut TcpStream,
+    host: &str,
+    port: u16,
+    dur: Duration,
+) -> Option<Probed> {
     let mut payload = vec![0x00]; // handshake packet id
     write_varint(&mut payload, 765); // protocol version (any recent value works)
     write_varint(&mut payload, host.len() as i32);
@@ -1034,7 +1086,10 @@ pub fn json_num(json: &str, key: &str) -> Option<i64> {
     let pos = json.find(&needle)?;
     let rest = json[pos + needle.len()..].trim_start();
     let rest = rest.strip_prefix(':')?.trim_start();
-    let digits: String = rest.chars().take_while(|c| c.is_ascii_digit() || *c == '-').collect();
+    let digits: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '-')
+        .collect();
     digits.parse().ok()
 }
 
@@ -1080,7 +1135,12 @@ pub async fn epmd(stream: &mut TcpStream, dur: Duration) -> Option<Probed> {
 pub async fn cassandra(stream: &mut TcpStream, dur: Duration) -> Option<Probed> {
     // OPTIONS on protocol v4; servers that only speak v3 answer with an ERROR
     // frame that still identifies them.
-    send(stream, &[0x04, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00], dur).await?;
+    send(
+        stream,
+        &[0x04, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, 0x00],
+        dur,
+    )
+    .await?;
     let resp = read_at_least(stream, 9, dur).await;
     if resp.len() < 9 || resp[0] & 0x80 == 0 {
         return None;
@@ -1279,8 +1339,9 @@ pub async fn x11(stream: &mut TcpStream, dur: Duration) -> Option<Probed> {
                 let vendor_len = le16(&resp, 24) as usize;
                 let start = 40;
                 if start + vendor_len <= resp.len() && vendor_len > 0 && vendor_len < 128 {
-                    let vendor =
-                        String::from_utf8_lossy(&resp[start..start + vendor_len]).trim().to_string();
+                    let vendor = String::from_utf8_lossy(&resp[start..start + vendor_len])
+                        .trim()
+                        .to_string();
                     if !vendor.is_empty() {
                         p.product = vendor;
                     }
@@ -1294,8 +1355,9 @@ pub async fn x11(stream: &mut TcpStream, dur: Duration) -> Option<Probed> {
         0 => {
             let reason_len = resp[1] as usize;
             if 8 + reason_len <= resp.len() {
-                let reason =
-                    String::from_utf8_lossy(&resp[8..8 + reason_len]).trim().to_string();
+                let reason = String::from_utf8_lossy(&resp[8..8 + reason_len])
+                    .trim()
+                    .to_string();
                 p.extra = reason;
             } else {
                 p.extra = "access denied".into();
@@ -1361,7 +1423,9 @@ pub async fn ldap(stream: &mut TcpStream, dur: Duration) -> Option<Probed> {
     let text = ascii(&resp);
     let mut p = Probed::named("ldap", "LDAP server");
     let lower = text.to_ascii_lowercase();
-    if lower.contains("microsoft") || lower.contains("configuration,dc=") || lower.contains("forestdns")
+    if lower.contains("microsoft")
+        || lower.contains("configuration,dc=")
+        || lower.contains("forestdns")
     {
         p.product = "Microsoft Active Directory LDAP".into();
         p.os_hint = "Windows".into();
@@ -1379,7 +1443,9 @@ pub async fn ldap(stream: &mut TcpStream, dur: Duration) -> Option<Probed> {
     }
     for token in text.split_whitespace() {
         if token.to_ascii_uppercase().starts_with("DC=") && bits.len() < 3 {
-            let t = token.trim_matches(|c: char| !c.is_ascii_graphic()).to_string();
+            let t = token
+                .trim_matches(|c: char| !c.is_ascii_graphic())
+                .to_string();
             if !bits.contains(&t) {
                 bits.push(t);
             }
@@ -1450,7 +1516,10 @@ pub async fn oracle_tns(stream: &mut TcpStream, dur: Duration) -> Option<Probed>
     let mut p = Probed::named("oracle-tns", "Oracle TNS Listener");
     let text = ascii(&resp);
     if let Some(pos) = text.find("VSNNUM=") {
-        let digits: String = text[pos + 7..].chars().take_while(|c| c.is_ascii_digit()).collect();
+        let digits: String = text[pos + 7..]
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
         if let Ok(v) = digits.parse::<u32>() {
             p.version = oracle_version(v);
         }
@@ -1467,7 +1536,10 @@ pub async fn oracle_tns(stream: &mut TcpStream, dur: Duration) -> Option<Probed>
         };
     }
     if let Some(pos) = text.find("ERR=") {
-        let code: String = text[pos + 4..].chars().take_while(|c| c.is_ascii_digit()).collect();
+        let code: String = text[pos + 4..]
+            .chars()
+            .take_while(|c| c.is_ascii_digit())
+            .collect();
         if !code.is_empty() {
             p.extra = format!("TNS-{code}");
         }
@@ -1591,5 +1663,9 @@ pub fn looks_like_version(t: &str) -> bool {
     let second = parts.next().unwrap_or("");
     !first.is_empty()
         && first.chars().all(|c| c.is_ascii_digit())
-        && second.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+        && second
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
 }

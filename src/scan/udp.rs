@@ -86,7 +86,12 @@ pub async fn probe(ip: IpAddr, port: u16, timeout_ms: u64, retries: u32) -> UdpR
         }
     }
 
-    UdpReport { port, state, service: best, reason }
+    UdpReport {
+        port,
+        state,
+        service: best,
+        reason,
+    }
 }
 
 /// How much a parsed result actually tells us, used to pick between the
@@ -114,7 +119,11 @@ enum Recv {
 }
 
 async fn send_recv(addr: SocketAddr, payload: &[u8], dur: Duration) -> Recv {
-    let bind = if addr.is_ipv6() { "[::]:0" } else { "0.0.0.0:0" };
+    let bind = if addr.is_ipv6() {
+        "[::]:0"
+    } else {
+        "0.0.0.0:0"
+    };
     let Ok(sock) = UdpSocket::bind(bind).await else {
         return Recv::Error;
     };
@@ -417,7 +426,7 @@ fn isakmp_sa() -> Vec<u8> {
     let mut transform = Vec::new();
     transform.extend_from_slice(&[0x00, 0x00, 0x00, 0x24]); // next=none, len=36
     transform.extend_from_slice(&[0x01, 0x01, 0x00, 0x00]); // transform 1, KEY_IKE
-    // Attributes: 3DES / SHA1 / preshared / group 2 / lifetime 28800s
+                                                            // Attributes: 3DES / SHA1 / preshared / group 2 / lifetime 28800s
     transform.extend_from_slice(&[0x80, 0x01, 0x00, 0x05]);
     transform.extend_from_slice(&[0x80, 0x02, 0x00, 0x02]);
     transform.extend_from_slice(&[0x80, 0x03, 0x00, 0x01]);
@@ -486,9 +495,8 @@ fn openvpn_reset() -> Vec<u8> {
 
 fn citrix_ica_browse() -> Vec<u8> {
     vec![
-        0x1e, 0x00, 0x01, 0x30, 0x02, 0xfd, 0xa8, 0xe3, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x1e, 0x00, 0x01, 0x30, 0x02, 0xfd, 0xa8, 0xe3, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     ]
 }
 
@@ -657,7 +665,9 @@ fn enip_list_identity() -> Vec<u8> {
 /// BACnet Who-Is. Building controllers answer I-Am with their device instance
 /// and vendor identifier.
 fn bacnet_whois() -> Vec<u8> {
-    vec![0x81, 0x0b, 0x00, 0x0c, 0x01, 0x20, 0xff, 0xff, 0x00, 0xff, 0x10, 0x08]
+    vec![
+        0x81, 0x0b, 0x00, 0x0c, 0x01, 0x20, 0xff, 0xff, 0x00, 0xff, 0x10, 0x08,
+    ]
 }
 
 /// Mumble/Murmur ping: version, user count and bandwidth, no auth.
@@ -685,16 +695,31 @@ fn dhcp_inform() -> Vec<u8> {
 
 fn ascii(b: &[u8]) -> String {
     b.iter()
-        .map(|&c| if (0x20..0x7f).contains(&c) { c as char } else { ' ' })
+        .map(|&c| {
+            if (0x20..0x7f).contains(&c) {
+                c as char
+            } else {
+                ' '
+            }
+        })
         .collect()
 }
 
 fn clean(s: &str, max: usize) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(max).collect()
+    s.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .chars()
+        .take(max)
+        .collect()
 }
 
 fn named(name: &'static str, product: &str) -> Probed {
-    Probed { name, product: product.to_string(), ..Default::default() }
+    Probed {
+        name,
+        product: product.to_string(),
+        ..Default::default()
+    }
 }
 
 /// Turn a response into a service identification. Every branch here is reached
@@ -738,9 +763,17 @@ fn parse(port: u16, data: &[u8], _ip: IpAddr) -> Probed {
         _ => {
             let text = clean(&ascii(data), 60);
             if text.len() >= 4 {
-                Probed { name: "unknown", banner: text, ..Default::default() }
+                Probed {
+                    name: "unknown",
+                    banner: text,
+                    ..Default::default()
+                }
             } else {
-                Probed { name: "unknown", extra: format!("{} byte reply", data.len()), ..Default::default() }
+                Probed {
+                    name: "unknown",
+                    extra: format!("{} byte reply", data.len()),
+                    ..Default::default()
+                }
             }
         }
     }
@@ -761,7 +794,11 @@ fn parse_ntp(data: &[u8]) -> Probed {
         for key in ["version", "processor", "system", "leap", "stratum"] {
             if let Some(v) = kv_lookup(&text, key) {
                 if key == "version" {
-                    p.product = v.split(&['@', ' '][..]).next().unwrap_or("ntpd").to_string();
+                    p.product = v
+                        .split(&['@', ' '][..])
+                        .next()
+                        .unwrap_or("ntpd")
+                        .to_string();
                     p.version = crate::service::probe::first_version(&v);
                     if p.version.is_empty() {
                         p.version = v.clone();
@@ -842,7 +879,10 @@ fn parse_snmp(data: &[u8]) -> Probed {
         v.extend_from_slice(SYSDESCR_OID);
         v
     };
-    if let Some(pos) = data.windows(needle.len()).position(|w| w == needle.as_slice()) {
+    if let Some(pos) = data
+        .windows(needle.len())
+        .position(|w| w == needle.as_slice())
+    {
         let i = pos + needle.len();
         if i + 2 <= data.len() && data[i] == 0x04 {
             let len = data[i + 1] as usize;
@@ -1063,7 +1103,11 @@ fn parse_ipmi(data: &[u8]) -> Probed {
     if !body.is_empty() {
         let auth_support = body.get(2).copied().unwrap_or(0);
         let auth_status = body.get(3).copied().unwrap_or(0);
-        p.version = if auth_support & 0x80 != 0 { "2.0".into() } else { "1.5".into() };
+        p.version = if auth_support & 0x80 != 0 {
+            "2.0".into()
+        } else {
+            "1.5".into()
+        };
         if auth_support & 0x01 != 0 {
             bits.push("NULL authentication permitted".to_string());
         }
@@ -1106,7 +1150,11 @@ fn parse_ssdp(data: &[u8]) -> Probed {
             p.os_hint = server.clone();
             p.banner = server;
         } else if lower.starts_with("st:") || lower.starts_with("nt:") {
-            bits.push(line.split_once(':').map(|(_, v)| v.trim().to_string()).unwrap_or_default());
+            bits.push(
+                line.split_once(':')
+                    .map(|(_, v)| v.trim().to_string())
+                    .unwrap_or_default(),
+            );
         } else if lower.starts_with("location:") {
             bits.push(line.trim().to_string());
         }
@@ -1217,7 +1265,13 @@ fn parse_a2s(data: &[u8]) -> Probed {
     let text = ascii(data);
     if text.contains("statusResponse") || text.contains("\\gamename\\") {
         p.product = "Quake/idTech server".into();
-        for key in ["gamename", "sv_hostname", "mapname", "version", "shortversion"] {
+        for key in [
+            "gamename",
+            "sv_hostname",
+            "mapname",
+            "version",
+            "shortversion",
+        ] {
             if let Some(pos) = text.find(&format!("\\{key}\\")) {
                 let v: String = text[pos + key.len() + 2..]
                     .chars()
@@ -1252,11 +1306,21 @@ fn parse_a2s(data: &[u8]) -> Probed {
         fields.get(2).cloned().unwrap_or_default(),
         fields.get(3).cloned().unwrap_or_default(),
     );
-    p.product = if game.is_empty() { "Source game server".into() } else { game };
+    p.product = if game.is_empty() {
+        "Source game server".into()
+    } else {
+        game
+    };
     if i + 4 <= data.len() {
         let players = data[i + 2];
         let max = data[i + 3];
-        p.extra = format!("\"{}\"; map {}; {}/{} players", clean(&name, 40), clean(&map, 24), players, max);
+        p.extra = format!(
+            "\"{}\"; map {}; {}/{} players",
+            clean(&name, 40),
+            clean(&map, 24),
+            players,
+            max
+        );
     } else {
         p.extra = clean(&name, 40);
     }
@@ -1306,8 +1370,8 @@ fn parse_enip(data: &[u8]) -> Probed {
         return p;
     }
     let id = 24 + 2 + 2 + 2; // header + item count + item type + item length
-    // Identity: encap_version(2) socket(16) vendor(2) device_type(2)
-    // product_code(2) revision(2) status(2) serial(4) name_len(1) name
+                             // Identity: encap_version(2) socket(16) vendor(2) device_type(2)
+                             // product_code(2) revision(2) status(2) serial(4) name_len(1) name
     let base = id + 2 + 16;
     if data.len() < base + 15 {
         return p;
@@ -1325,7 +1389,10 @@ fn parse_enip(data: &[u8]) -> Probed {
     let name_len = data[base + 14] as usize;
     let name_start = base + 15;
     if name_len > 0 && name_start + name_len <= data.len() {
-        p.product = clean(&String::from_utf8_lossy(&data[name_start..name_start + name_len]), 48);
+        p.product = clean(
+            &String::from_utf8_lossy(&data[name_start..name_start + name_len]),
+            48,
+        );
     }
     p.version = revision;
     p.extra = format!(
@@ -1456,13 +1523,12 @@ fn parse_sip(data: &[u8]) -> Probed {
 /// UDP ports worth scanning by default — the ones that actually answer and
 /// identify something. A blind UDP sweep of 65535 ports is mostly waiting.
 pub const TOP_UDP_PORTS: &[u16] = &[
-    53, 67, 68, 69, 123, 135, 137, 138, 139, 161, 162, 177, 445, 500, 514, 520,
-    623, 631, 1434, 1604, 1701, 1900, 2049, 3283, 3478, 3702, 4500, 5060, 5353,
-    5355, 5683, 10001, 11211, 17185, 19132, 20000, 27015, 30718, 44818, 47808,
-    49152, 64738, 5093, 427, 111, 7, 13, 17, 19, 37, 88, 389, 464, 546, 547,
-    593, 749, 996, 997, 998, 999, 1025, 1026, 1027, 1028, 1029, 1030, 1194,
-    1645, 1646, 1812, 1813, 2000, 2222, 3456, 4045, 5000, 5001, 5432, 6346,
-    9200, 27016, 27017, 27960, 26000, 32768, 32769, 33281, 65024,
+    53, 67, 68, 69, 123, 135, 137, 138, 139, 161, 162, 177, 445, 500, 514, 520, 623, 631, 1434,
+    1604, 1701, 1900, 2049, 3283, 3478, 3702, 4500, 5060, 5353, 5355, 5683, 10001, 11211, 17185,
+    19132, 20000, 27015, 30718, 44818, 47808, 49152, 64738, 5093, 427, 111, 7, 13, 17, 19, 37, 88,
+    389, 464, 546, 547, 593, 749, 996, 997, 998, 999, 1025, 1026, 1027, 1028, 1029, 1030, 1194,
+    1645, 1646, 1812, 1813, 2000, 2222, 3456, 4045, 5000, 5001, 5432, 6346, 9200, 27016, 27017,
+    27960, 26000, 32768, 32769, 33281, 65024,
 ];
 
 pub fn top_udp_ports(n: usize) -> Vec<u16> {

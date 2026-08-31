@@ -46,7 +46,13 @@ struct NsResult {
     axfr: Option<usize>,
 }
 
-pub async fn audit(domain: &str, resolver: SocketAddr, timeout_ms: u64, color: bool, verbosity: u8) {
+pub async fn audit(
+    domain: &str,
+    resolver: SocketAddr,
+    timeout_ms: u64,
+    color: bool,
+    verbosity: u8,
+) {
     let p = Painter::new(color);
     let domain = domain.trim_end_matches('.');
 
@@ -122,7 +128,10 @@ pub async fn audit(domain: &str, resolver: SocketAddr, timeout_ms: u64, color: b
         } else {
             p.yellow("no")
         };
-        let serial = r.serial.map(|s| s.to_string()).unwrap_or_else(|| "-".into());
+        let serial = r
+            .serial
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "-".into());
         let mut notes = Vec::new();
         if r.recursive {
             notes.push(p.red("OPEN RESOLVER"));
@@ -153,7 +162,11 @@ pub async fn audit(domain: &str, resolver: SocketAddr, timeout_ms: u64, color: b
     println!();
     let reachable: Vec<&NsResult> = results.iter().filter(|r| r.reachable).collect();
     if reachable.is_empty() {
-        println!("{}{:<11} no name server answered", mark(&p, Mark::Bad), "REACHABLE");
+        println!(
+            "{}{:<11} no name server answered",
+            mark(&p, Mark::Bad),
+            "REACHABLE"
+        );
         return;
     }
 
@@ -162,8 +175,8 @@ pub async fn audit(domain: &str, resolver: SocketAddr, timeout_ms: u64, color: b
     // something on the path answering DNS on their behalf (a captive portal,
     // a corporate resolver, an ISP redirect). Say so rather than reporting a
     // page of alarming findings that belong to the network, not the domain.
-    let intercepted = reachable.len() > 1
-        && reachable.iter().all(|r| !r.authoritative && r.recursive);
+    let intercepted =
+        reachable.len() > 1 && reachable.iter().all(|r| !r.authoritative && r.recursive);
     if intercepted {
         println!(
             "{}{:<11} every server answered non-authoritatively *and* recursed — this network is \n{:<16}intercepting DNS, so the per-server results below describe the interceptor, not the domain.",
@@ -224,7 +237,12 @@ pub async fn audit(domain: &str, resolver: SocketAddr, timeout_ms: u64, color: b
                 "SERIAL"
             );
             for (serial, hosts) in &serials {
-                println!("{:<16}{} {}", "", p.dim(&format!("{serial}:")), hosts.join(", "));
+                println!(
+                    "{:<16}{} {}",
+                    "",
+                    p.dim(&format!("{serial}:")),
+                    hosts.join(", ")
+                );
             }
         }
     }
@@ -282,7 +300,11 @@ pub async fn audit(domain: &str, resolver: SocketAddr, timeout_ms: u64, color: b
             leaky.join(", ")
         );
     } else {
-        println!("{}{:<11} zone transfers refused", mark(&p, Mark::Ok), "AXFR");
+        println!(
+            "{}{:<11} zone transfers refused",
+            mark(&p, Mark::Ok),
+            "AXFR"
+        );
     }
 
     // Name servers all inside one network are a shared failure domain.
@@ -386,7 +408,12 @@ async fn check_one(name: String, zone: String, timeout_ms: u64) -> NsResult {
     // SOA with RD cleared: the AA flag in the reply is what proves this server
     // really is authoritative for the zone rather than just caching it.
     let soa_qt = dns::type_to_num("SOA").unwrap();
-    let opts = QueryOpts { timeout_ms, no_recurse: true, udp_size: 1232, ..Default::default() };
+    let opts = QueryOpts {
+        timeout_ms,
+        no_recurse: true,
+        udp_size: 1232,
+        ..Default::default()
+    };
     if let Ok(resp) = dns::query_opts(server, &zone, soa_qt, &opts).await {
         result.reachable = true;
         result.authoritative = resp.aa;
@@ -403,19 +430,36 @@ async fn check_one(name: String, zone: String, timeout_ms: u64) -> NsResult {
     // Does it recurse for a name it is not authoritative for? A "yes" here is
     // an open resolver, whatever the server thinks it is configured as.
     let a_qt = dns::type_to_num("A").unwrap();
-    let rec_opts = QueryOpts { timeout_ms, no_recurse: false, udp_size: 1232, ..Default::default() };
+    let rec_opts = QueryOpts {
+        timeout_ms,
+        no_recurse: false,
+        udp_size: 1232,
+        ..Default::default()
+    };
     if let Ok(resp) = dns::query_opts(server, "www.google.com", a_qt, &rec_opts).await {
         result.recursive = resp.ra && !resp.answers.is_empty() && resp.rcode == 0;
     }
 
     // TCP/53 must work: it is required for large answers and for DNSSEC, and
     // firewalls that allow only UDP break both.
-    let tcp_opts = QueryOpts { timeout_ms, force_tcp: true, no_recurse: true, ..Default::default() };
-    result.tcp = dns::query_opts(server, &zone, soa_qt, &tcp_opts).await.is_ok();
+    let tcp_opts = QueryOpts {
+        timeout_ms,
+        force_tcp: true,
+        no_recurse: true,
+        ..Default::default()
+    };
+    result.tcp = dns::query_opts(server, &zone, soa_qt, &tcp_opts)
+        .await
+        .is_ok();
 
     // version.bind, the same CHAOS TXT question the port scanner asks.
     let txt_qt = 16u16;
-    let ver_opts = QueryOpts { timeout_ms, no_recurse: true, udp_size: 0, ..Default::default() };
+    let ver_opts = QueryOpts {
+        timeout_ms,
+        no_recurse: true,
+        udp_size: 0,
+        ..Default::default()
+    };
     if let Ok(resp) = dns::query_chaos(server, "version.bind", txt_qt, &ver_opts).await {
         if let Some(RData::Txt(parts)) = resp.answers.first().map(|r| &r.data) {
             let v = parts.concat();

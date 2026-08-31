@@ -21,14 +21,30 @@ impl Painter {
         }
     }
 
-    pub fn bold(&self, s: &str) -> String   { self.wrap("1",  s) }
-    pub fn dim(&self, s: &str) -> String    { self.wrap("2",  s) }
-    pub fn red(&self, s: &str) -> String    { self.wrap("31", s) }
-    pub fn green(&self, s: &str) -> String  { self.wrap("32", s) }
-    pub fn yellow(&self, s: &str) -> String { self.wrap("33", s) }
-    pub fn blue(&self, s: &str) -> String   { self.wrap("34", s) }
-    pub fn magenta(&self, s: &str) -> String { self.wrap("35", s) }
-    pub fn cyan(&self, s: &str) -> String   { self.wrap("36", s) }
+    pub fn bold(&self, s: &str) -> String {
+        self.wrap("1", s)
+    }
+    pub fn dim(&self, s: &str) -> String {
+        self.wrap("2", s)
+    }
+    pub fn red(&self, s: &str) -> String {
+        self.wrap("31", s)
+    }
+    pub fn green(&self, s: &str) -> String {
+        self.wrap("32", s)
+    }
+    pub fn yellow(&self, s: &str) -> String {
+        self.wrap("33", s)
+    }
+    pub fn blue(&self, s: &str) -> String {
+        self.wrap("34", s)
+    }
+    pub fn magenta(&self, s: &str) -> String {
+        self.wrap("35", s)
+    }
+    pub fn cyan(&self, s: &str) -> String {
+        self.wrap("36", s)
+    }
 }
 
 /// Escapa una cadena para incrustarla en la salida JSON.
@@ -36,7 +52,7 @@ pub fn json_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     for c in s.chars() {
         match c {
-            '"'  => out.push_str("\\\""),
+            '"' => out.push_str("\\\""),
             '\\' => out.push_str("\\\\"),
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),

@@ -74,26 +74,62 @@ impl Timing {
     /// las protecciones, para una LAN o laboratorio aislado sin NAT ni cortafuegos.
     pub fn from_template(t: u8) -> Timing {
         match t {
-            0 => Timing { concurrency: 1,   connect_timeout_ms: 5000, retries: 3, host_delay_ms: 500, max_rate: 5   },
-            1 => Timing { concurrency: 10,  connect_timeout_ms: 3000, retries: 2, host_delay_ms: 100, max_rate: 15  },
-            2 => Timing { concurrency: 20,  connect_timeout_ms: 2000, retries: 2, host_delay_ms: 10,  max_rate: 30  },
+            0 => Timing {
+                concurrency: 1,
+                connect_timeout_ms: 5000,
+                retries: 3,
+                host_delay_ms: 500,
+                max_rate: 5,
+            },
+            1 => Timing {
+                concurrency: 10,
+                connect_timeout_ms: 3000,
+                retries: 2,
+                host_delay_ms: 100,
+                max_rate: 15,
+            },
+            2 => Timing {
+                concurrency: 20,
+                connect_timeout_ms: 2000,
+                retries: 2,
+                host_delay_ms: 10,
+                max_rate: 30,
+            },
             // T3 (defecto): 30 concurrentes, limitación 50/s — seguro para conntrack del
             // router doméstico. Cada connect() con timeout deja una entrada zombie en el
             // router por 60-120 s; el límite de tasa mantiene la tasa de SYN lo bastante
             // baja para que un cortafuegos con estado no marque el barrido y empiece a
             // descartar paquetes — el modo de fallo que devuelve "0 open" en un host
             // alcanzable. nmap evita esto con raw SYN (-sS); connect() no puede.
-            3 => Timing { concurrency: 30,  connect_timeout_ms: 1500, retries: 1, host_delay_ms: 0,   max_rate: 50  },
+            3 => Timing {
+                concurrency: 30,
+                connect_timeout_ms: 1500,
+                retries: 1,
+                host_delay_ms: 0,
+                max_rate: 50,
+            },
             // T4: rápido pero aún seguro para WAN. 100 concurrentes con un límite de 150/s
             // es ~3x el rendimiento de T3 manteniéndose por debajo del umbral de ráfaga que
             // hace que un router doméstico descarte todo el barrido (incluidos los puertos
             // abiertos). Con 150 concurrentes sin límite antes devolvía "0 open" en hosts
             // reales de internet aunque 80/443 estuvieran activos.
-            4 => Timing { concurrency: 100, connect_timeout_ms: 1000, retries: 1, host_delay_ms: 0,   max_rate: 150 },
+            4 => Timing {
+                concurrency: 100,
+                connect_timeout_ms: 1000,
+                retries: 1,
+                host_delay_ms: 0,
+                max_rate: 150,
+            },
             // T5: insano — sin límite de tasa, solo para LAN / laboratorio (sin NAT, sin
             // cortafuegos con estado). En internet descartará paquetes; es el compromiso
             // al que se opta. Se puede volver a activar el límite con --max-rate.
-            5 => Timing { concurrency: 500, connect_timeout_ms: 400,  retries: 0, host_delay_ms: 0,   max_rate: 0   },
+            5 => Timing {
+                concurrency: 500,
+                connect_timeout_ms: 400,
+                retries: 0,
+                host_delay_ms: 0,
+                max_rate: 0,
+            },
             _ => Timing::from_template(3),
         }
     }
@@ -101,7 +137,13 @@ impl Timing {
     /// Hyper-speed (`-HS`): tan rápido como la máquina pueda razonablemente empujar
     /// sin agotar los descriptores de fichero en sistemas limitados como Termux.
     pub fn hyper() -> Timing {
-        Timing { concurrency: 3000, connect_timeout_ms: 300, retries: 0, host_delay_ms: 0, max_rate: 0 }
+        Timing {
+            concurrency: 3000,
+            connect_timeout_ms: 300,
+            retries: 0,
+            host_delay_ms: 0,
+            max_rate: 0,
+        }
     }
 }
 
@@ -117,14 +159,14 @@ pub struct Options {
     pub ports_explicit: bool,
     pub ports_selected: bool,
     pub service_detection: bool,
-    pub udp_scan: bool,         // -sU: probe UDP ports with protocol payloads
+    pub udp_scan: bool, // -sU: probe UDP ports with protocol payloads
     pub udp_ports: Vec<u16>,
     pub udp_ports_explicit: bool,
     pub os_detection: bool,
     /// -WW: web fingerprint (whatweb-style) on open HTTP/HTTPS ports. Implies
     /// -sV so we know which ports are web to begin with.
     pub web_scan: bool,
-    pub mac_info: bool,        // -MC: MAC address from the local ARP/neighbor cache
+    pub mac_info: bool, // -MC: MAC address from the local ARP/neighbor cache
     pub device_detection: bool, // -DP: best-effort device-type guess (phone/console/PC/...)
     pub vuln: bool,
     pub only_open: bool,
@@ -170,11 +212,11 @@ pub struct Options {
     pub dns_short: bool,
     pub dns_tcp: bool,
     pub dns_trace_ttl: bool,
-    pub dns_dnssec: bool,   // +dnssec: set the EDNS0 DO bit
-    pub dns_nsid: bool,     // +nsid: identify the answering anycast node
-    pub dns_norec: bool,    // +norec: clear RD, ask the server for its own data
-    pub dns_trace: bool,    // +trace: iterate from the root
-    pub dns_all: bool,      // +all: show authority/additional sections too
+    pub dns_dnssec: bool, // +dnssec: set the EDNS0 DO bit
+    pub dns_nsid: bool,   // +nsid: identify the answering anycast node
+    pub dns_norec: bool,  // +norec: clear RD, ask the server for its own data
+    pub dns_trace: bool,  // +trace: iterate from the root
+    pub dns_all: bool,    // +all: show authority/additional sections too
     /// +subnet: EDNS Client Subnet — ask as if from this network (RFC 7871).
     pub dns_subnet: Option<(std::net::IpAddr, u8)>,
     /// +dot: send the query over TLS 1.3 on port 853 instead of in the clear.
@@ -300,24 +342,138 @@ fn split_list(s: &str) -> Vec<String> {
 /// parser so a new flag added above without an entry here is visible as the
 /// omission it is.
 const KNOWN_FLAGS: &[&str] = &[
-    "--help", "--version", "--connect", "--syn", "--udp", "--udp-scan", "--port-famous",
-    "--ports-all", "--top-ports", "--ports", "--fast", "--exclude-ports", "--target-file",
-    "--exclude", "--exclude-file", "--service-version", "--udp-ports", "--top-udp",
-    "--os-detection", "--mac", "--device", "--vuln", "--aggressive", "--all-out", "--no-ping",
-    "-WW", "--webscan", "--web",
-    "--hyper-speed", "--concurrency", "--max-concurrency", "--timeout", "--retries",
-    "--scan-delay", "--max-rate", "--open", "--reason", "--progress", "--stats-every", "--min-severity",
-    "--firewall", "--firewall-check", "--no-stream", "--no-live", "--stream", "--live", "-FW",
-    "--output-normal", "--json", "--grepable", "--no-color", "--color", "--dns", "--reverse",
-    "--mail", "--mail-audit", "--whois", "--lookup", "--neighbor", "--neighbour", "--ns",
-    "--nameservers", "--short", "--dnssec", "--nsid", "--no-recurse", "--trace",
-    "--all-sections", "--dns-tcp", "--ttl", "--dns-port", "--subnet", "--client-subnet",
-    "--dot", "--dns-tls", "--doh", "--dns-https", "--vuln-list", "--list-vulns",
-    "-h", "-V", "-sT", "-sS", "-sU", "-sV", "-PF", "-PA", "-p-", "-p", "-pU", "-F", "-iL",
-    "-OS", "-O", "-MC", "-DP", "-A", "-AA", "-Pn", "-HS", "-oN", "-oJ", "-oG", "-4", "-6",
-    "-T0", "-T1", "-T2", "-T3", "-T4", "-T5", "-D", "-x", "-M", "-w", "-L", "-N", "-NS", "-v",
-    "+short", "+tcp", "+ttl", "+dnssec", "+do", "+nsid", "+norec", "+trace", "+all", "+subnet",
-    "+dot", "+tls", "+https",
+    "--help",
+    "--version",
+    "--connect",
+    "--syn",
+    "--udp",
+    "--udp-scan",
+    "--port-famous",
+    "--ports-all",
+    "--top-ports",
+    "--ports",
+    "--fast",
+    "--exclude-ports",
+    "--target-file",
+    "--exclude",
+    "--exclude-file",
+    "--service-version",
+    "--udp-ports",
+    "--top-udp",
+    "--os-detection",
+    "--mac",
+    "--device",
+    "--vuln",
+    "--aggressive",
+    "--all-out",
+    "--no-ping",
+    "-WW",
+    "--webscan",
+    "--web",
+    "--hyper-speed",
+    "--concurrency",
+    "--max-concurrency",
+    "--timeout",
+    "--retries",
+    "--scan-delay",
+    "--max-rate",
+    "--open",
+    "--reason",
+    "--progress",
+    "--stats-every",
+    "--min-severity",
+    "--firewall",
+    "--firewall-check",
+    "--no-stream",
+    "--no-live",
+    "--stream",
+    "--live",
+    "-FW",
+    "--output-normal",
+    "--json",
+    "--grepable",
+    "--no-color",
+    "--color",
+    "--dns",
+    "--reverse",
+    "--mail",
+    "--mail-audit",
+    "--whois",
+    "--lookup",
+    "--neighbor",
+    "--neighbour",
+    "--ns",
+    "--nameservers",
+    "--short",
+    "--dnssec",
+    "--nsid",
+    "--no-recurse",
+    "--trace",
+    "--all-sections",
+    "--dns-tcp",
+    "--ttl",
+    "--dns-port",
+    "--subnet",
+    "--client-subnet",
+    "--dot",
+    "--dns-tls",
+    "--doh",
+    "--dns-https",
+    "--vuln-list",
+    "--list-vulns",
+    "-h",
+    "-V",
+    "-sT",
+    "-sS",
+    "-sU",
+    "-sV",
+    "-PF",
+    "-PA",
+    "-p-",
+    "-p",
+    "-pU",
+    "-F",
+    "-iL",
+    "-OS",
+    "-O",
+    "-MC",
+    "-DP",
+    "-A",
+    "-AA",
+    "-Pn",
+    "-HS",
+    "-oN",
+    "-oJ",
+    "-oG",
+    "-4",
+    "-6",
+    "-T0",
+    "-T1",
+    "-T2",
+    "-T3",
+    "-T4",
+    "-T5",
+    "-D",
+    "-x",
+    "-M",
+    "-w",
+    "-L",
+    "-N",
+    "-NS",
+    "-v",
+    "+short",
+    "+tcp",
+    "+ttl",
+    "+dnssec",
+    "+do",
+    "+nsid",
+    "+norec",
+    "+trace",
+    "+all",
+    "+subnet",
+    "+dot",
+    "+tls",
+    "+https",
 ];
 
 /// Levenshtein distance, used only to say "did you mean".
@@ -429,8 +585,18 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                 o.mode = Mode::Scan;
                 i = 1;
             }
-            "help" => return Ok(Options { mode: Mode::Help, ..o }),
-            "version" => return Ok(Options { mode: Mode::Version, ..o }),
+            "help" => {
+                return Ok(Options {
+                    mode: Mode::Help,
+                    ..o
+                })
+            }
+            "version" => {
+                return Ok(Options {
+                    mode: Mode::Version,
+                    ..o
+                })
+            }
             _ => {}
         }
     }
@@ -458,7 +624,12 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                     .get(i + 1)
                     .filter(|t| !t.starts_with('-') && !t.starts_with('@') && !t.starts_with('+'))
                     .cloned();
-                return Ok(Options { mode: Mode::Help, help_topic: topic, help_spanish: false, ..o });
+                return Ok(Options {
+                    mode: Mode::Help,
+                    help_topic: topic,
+                    help_spanish: false,
+                    ..o
+                });
             }
             "-ayuda" | "--ayuda" => {
                 // Spanish help: consume a following word as the topic
@@ -466,9 +637,19 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
                     .get(i + 1)
                     .filter(|t| !t.starts_with('-') && !t.starts_with('@') && !t.starts_with('+'))
                     .cloned();
-                return Ok(Options { mode: Mode::Help, help_topic: topic, help_spanish: true, ..o });
+                return Ok(Options {
+                    mode: Mode::Help,
+                    help_topic: topic,
+                    help_spanish: true,
+                    ..o
+                });
             }
-            "-V" | "--version" => return Ok(Options { mode: Mode::Version, ..o }),
+            "-V" | "--version" => {
+                return Ok(Options {
+                    mode: Mode::Version,
+                    ..o
+                })
+            }
 
             // ---- scan type ----
             "-sT" | "--connect" => o.scan_kind = ScanKind::Connect,
@@ -602,7 +783,9 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             }
             "--max-rate" => {
                 i += 1;
-                let v = args.get(i).ok_or("--max-rate requires connections/second (0 = unlimited)")?;
+                let v = args
+                    .get(i)
+                    .ok_or("--max-rate requires connections/second (0 = unlimited)")?;
                 ov_max_rate = Some(v.parse().map_err(|_| "invalid max-rate")?);
             }
 
@@ -639,7 +822,9 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             "-D" | "--dns" => {
                 o.mode = Mode::Dns;
                 i += 1;
-                let v = args.get(i).ok_or("-D requires a record type (A, MX, ...)")?;
+                let v = args
+                    .get(i)
+                    .ok_or("-D requires a record type (A, MX, ...)")?;
                 o.dns_types.push(v.to_ascii_uppercase());
             }
             "-x" | "--reverse" => {
@@ -683,7 +868,9 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
             }
             "+subnet" | "--subnet" | "--client-subnet" => {
                 i += 1;
-                let v = args.get(i).ok_or("+subnet requires a network (e.g. 203.0.113.0/24)")?;
+                let v = args
+                    .get(i)
+                    .ok_or("+subnet requires a network (e.g. 203.0.113.0/24)")?;
                 o.dns_subnet = Some(crate::dns::parse_client_subnet(v)?);
                 o.mode = Mode::Dns;
             }
@@ -707,15 +894,24 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
 
             other => {
                 // stacked verbosity: -v, -vv, -vvv, ...
-                if other.len() >= 2 && other.starts_with('-') && other[1..].chars().all(|c| c == 'v') {
+                if other.len() >= 2
+                    && other.starts_with('-')
+                    && other[1..].chars().all(|c| c == 'v')
+                {
                     o.verbosity += (other.len() - 1) as u8;
                 }
                 // Accept any unambiguous abbreviation of --help / --version
                 // (e.g. `--h`, `--hel`, `--ver`).
                 else if other.len() >= 3 && "--help".starts_with(other) {
-                    return Ok(Options { mode: Mode::Help, ..o });
+                    return Ok(Options {
+                        mode: Mode::Help,
+                        ..o
+                    });
                 } else if other.len() >= 3 && "--version".starts_with(other) {
-                    return Ok(Options { mode: Mode::Version, ..o });
+                    return Ok(Options {
+                        mode: Mode::Version,
+                        ..o
+                    });
                 }
                 // --doh=https://... , the form people type out of habit.
                 else if let Some(v) = other.strip_prefix("--doh=") {
@@ -817,9 +1013,15 @@ pub fn parse(args: &[String]) -> Result<Options, String> {
 /// in the index. Order is the order they print under `--help all`.
 pub const HELP_TOPICS: &[(&str, &str)] = &[
     ("scan", "scan types: TCP connect, SYN, UDP"),
-    ("targets", "what to scan, from a file, and what to leave alone"),
+    (
+        "targets",
+        "what to scan, from a file, and what to leave alone",
+    ),
     ("ports", "choosing and excluding ports"),
-    ("detection", "-sV, -OS, -MC, -DP, -vuln and the aggressive presets"),
+    (
+        "detection",
+        "-sV, -OS, -MC, -DP, -vuln and the aggressive presets",
+    ),
     ("timing", "speed, concurrency, delays and progress"),
     ("output", "formats, colour, verbosity, filtering findings"),
     ("udp", "how UDP scanning gets a real answer without root"),
@@ -831,7 +1033,8 @@ pub const HELP_TOPICS: &[(&str, &str)] = &[
     ("all", "the complete reference"),
 ];
 
-const HEADER: &str = "Kaisen v{VERSION} — a fast nmap + dig hybrid network scanner (no root required)
+const HEADER: &str =
+    "Kaisen v{VERSION} — a fast nmap + dig hybrid network scanner (no root required)
 ";
 
 const USAGE: &str = "USAGE:
@@ -855,7 +1058,8 @@ const S_SCAN: &str = "  ── SCAN TYPE ─────────────
                            (default: ICMP ping + TCP 80/443 + ARP cache)
 ";
 
-const S_TARGETS: &str = "  ── TARGET SELECTION ───────────────────────────────────────────────────────
+const S_TARGETS: &str =
+    "  ── TARGET SELECTION ───────────────────────────────────────────────────────
     <target>               Hostname, IPv4, IPv6 or IPv4 CIDR (max /16). A
                            hostname is scanned at its primary address
     -iL, --target-file <FILE>  Read targets from a file: one per line, '#'
@@ -867,7 +1071,8 @@ const S_TARGETS: &str = "  ── TARGET SELECTION ─────────�
     -4 / -6                Force IPv4 / IPv6
 ";
 
-const S_PORTS: &str = "  ── PORT SELECTION ─────────────────────────────────────────────────────────
+const S_PORTS: &str =
+    "  ── PORT SELECTION ─────────────────────────────────────────────────────────
     -PF, --port-famous     Top 1000 famous TCP ports (DEFAULT)
     -PA, --ports-all, -p-  All TCP ports (1-65535)
     -F,  --fast            Top 100 TCP ports
@@ -880,7 +1085,8 @@ const S_PORTS: &str = "  ── PORT SELECTION ───────────
                            -PF, -PA and --top-ports the same way
 ";
 
-const S_DETECTION: &str = "  ── DETECTION ──────────────────────────────────────────────────────────────
+const S_DETECTION: &str =
+    "  ── DETECTION ──────────────────────────────────────────────────────────────
     -sV, --service-version Identify service and version on open ports
     -OS, --os-detection    Infer the OS. Used ALONE it prints a focused OS
                            report instead of a port table
@@ -913,7 +1119,8 @@ const S_DETECTION: &str = "  ── DETECTION ───────────�
     issuer, SAN hostnames and expiry — all read before any encryption starts.
 ";
 
-const S_TIMING: &str = "  ── TIMING & PERFORMANCE ───────────────────────────────────────────────────
+const S_TIMING: &str =
+    "  ── TIMING & PERFORMANCE ───────────────────────────────────────────────────
     -T0 .. -T5             Timing template: 0=paranoid .. 3=normal .. 5=insane
     -HS, --hyper-speed     Maximum concurrency, minimal timeouts
          --concurrency <N> Max simultaneous connections
@@ -941,7 +1148,8 @@ const S_TIMING: &str = "  ── TIMING & PERFORMANCE ────────�
     fraction of the old time without touching how gently it treats the network.
 ";
 
-const S_OUTPUT: &str = "  ── OUTPUT & DISPLAY ───────────────────────────────────────────────────────
+const S_OUTPUT: &str =
+    "  ── OUTPUT & DISPLAY ───────────────────────────────────────────────────────
     --open                 Only show open ports
     --reason               Show why a port is in the state it is
     --no-stream            Don't print open ports live as they are found; wait
@@ -1036,7 +1244,8 @@ const S_MAIL: &str = "  ── MAIL (email posture audit) ───────�
                            check against each MX, BIMI, MTA-STS, TLS-RPT, CAA
 ";
 
-const S_RECON: &str = "  ── LOOKUP, WHOIS & RECON ──────────────────────────────────────────────────
+const S_RECON: &str =
+    "  ── LOOKUP, WHOIS & RECON ──────────────────────────────────────────────────
     lookup, profile, host  Full DNS profile: A AAAA CNAME NS MX TXT SOA CAA at once
     -L, --lookup           Same as the `lookup` subcommand
     whois                  WHOIS for a domain or IP (from scratch, TCP/43)
@@ -1103,7 +1312,8 @@ fn section_body(topic: &str) -> Option<&'static str> {
 
 // ── SPANISH HELP (Ayuda en español) ──────────────────────────────────────────
 
-const HEADER_ES: &str = "Kaisen v{VERSION} — un escáner de red rápido que combina nmap + dig (sin requerir root)
+const HEADER_ES: &str =
+    "Kaisen v{VERSION} — un escáner de red rápido que combina nmap + dig (sin requerir root)
 ";
 
 const USAGE_ES: &str = "USO:
@@ -1117,7 +1327,8 @@ const USAGE_ES: &str = "USO:
     El binario también se instala como `kai` y `kaison`.
 ";
 
-const S_SCAN_ES: &str = "  ── TIPO DE ESCANEO ────────────────────────────────────────────────────────
+const S_SCAN_ES: &str =
+    "  ── TIPO DE ESCANEO ────────────────────────────────────────────────────────
     -sT, --connect         Escaneo TCP connect() (PREDETERMINADO, funciona sin root)
     -sS, --syn             Escaneo SYN semi-abierto (requiere root; regresa a -sT automáticamente)
     -sU, --udp             Escaneo UDP con payloads por protocolo (ver `--ayuda udp`)
@@ -1127,7 +1338,8 @@ const S_SCAN_ES: &str = "  ── TIPO DE ESCANEO ──────────
                            (predeterminado: ping ICMP + TCP 80/443 + caché ARP)
 ";
 
-const S_TARGETS_ES: &str = "  ── SELECCIÓN DE OBJETIVOS ────────────────────────────────────────────────
+const S_TARGETS_ES: &str =
+    "  ── SELECCIÓN DE OBJETIVOS ────────────────────────────────────────────────
     <objetivo>             Nombre de host, IPv4, IPv6 o CIDR IPv4 (máx /16). Un nombre
                            de host se escanea en su dirección primaria
     -iL, --target-file <ARCHIVO>  Leer objetivos de un archivo: uno por línea, '#'
@@ -1139,7 +1351,8 @@ const S_TARGETS_ES: &str = "  ── SELECCIÓN DE OBJETIVOS ──────�
     -4 / -6                Forzar IPv4 / IPv6
 ";
 
-const S_PORTS_ES: &str = "  ── SELECCIÓN DE PUERTOS ───────────────────────────────────────────────────
+const S_PORTS_ES: &str =
+    "  ── SELECCIÓN DE PUERTOS ───────────────────────────────────────────────────
     -PF, --port-famous     Top 1000 puertos TCP famosos (PREDETERMINADO)
     -PA, --ports-all, -p-  Todos los puertos TCP (1-65535)
     -F,  --fast            Top 100 puertos TCP
@@ -1152,7 +1365,8 @@ const S_PORTS_ES: &str = "  ── SELECCIÓN DE PUERTOS ───────�
                            -PF, -PA y --top-ports de la misma manera
 ";
 
-const S_DETECTION_ES: &str = "  ── DETECCIÓN ──────────────────────────────────────────────────────────────
+const S_DETECTION_ES: &str =
+    "  ── DETECCIÓN ──────────────────────────────────────────────────────────────
     -sV, --service-version Identificar servicio y versión en puertos abiertos
     -OS, --os-detection    Inferir el SO. Usado SOLO imprime un reporte OS enfocado
                            en lugar de una tabla de puertos
@@ -1185,7 +1399,8 @@ const S_DETECTION_ES: &str = "  ── DETECCIÓN ──────────
     emisor, nombres SAN y caducidad — todo leído antes de que comience cualquier encriptación.
 ";
 
-const S_TIMING_ES: &str = "  ── TIEMPO Y RENDIMIENTO ───────────────────────────────────────────────────
+const S_TIMING_ES: &str =
+    "  ── TIEMPO Y RENDIMIENTO ───────────────────────────────────────────────────
     -T0 .. -T5             Plantilla de tiempo: 0=paranoia .. 3=normal .. 5=insano
     -HS, --hyper-speed     Concurrencia máxima, timeouts mínimos
          --concurrency <N> Máximo de conexiones simultáneas
@@ -1237,7 +1452,8 @@ const S_OUTPUT_ES: &str = "  ── SALIDA Y VISUALIZACIÓN ──────�
     automáticamente cuando la salida no es una terminal, así que los archivos guardados se mantienen limpios.
 ";
 
-const S_UDP_ES: &str = "  ── ESCANEO UDP (-sU) ──────────────────────────────────────────────────────
+const S_UDP_ES: &str =
+    "  ── ESCANEO UDP (-sU) ──────────────────────────────────────────────────────
     Cada puerto UDP recibe un payload que el servicio realmente responderá, así que un
     viaje redondo prueba que el puerto está abierto e identifica qué hay en él:
 
@@ -1290,7 +1506,8 @@ const S_DNS_ES: &str = "  ── DNS (sustituto de dig) ────────
     Kaisen imprime esta advertencia con cada respuesta encriptada.
 ";
 
-const S_NS_ES: &str = "  ── AUDITORÍA DE SERVIDORES DE NOMBRES ──────────────────────────────────────
+const S_NS_ES: &str =
+    "  ── AUDITORÍA DE SERVIDORES DE NOMBRES ──────────────────────────────────────
     ns, nameservers        Auditar los servidores de nombres autorizados de un dominio
     -NS, --ns              Igual que el subcomando `ns`
                            Por servidor: alcanzabilidad, bandera AA (delegación coja),
@@ -1301,7 +1518,8 @@ const S_NS_ES: &str = "  ── AUDITORÍA DE SERVIDORES DE NOMBRES ────
                            está interceptando DNS y dice que los resultados no son confiables.
 ";
 
-const S_MAIL_ES: &str = "  ── MAIL (auditoría de postura de correo) ────────────────────────────────────
+const S_MAIL_ES: &str =
+    "  ── MAIL (auditoría de postura de correo) ────────────────────────────────────
     mail, email, mx        Auditar la postura de correo de un dominio en un solo golpe
     -M, --mail             Igual que el subcomando `mail`
                            MX y null-MX, SPF incluyendo el presupuesto de diez búsquedas RFC 7208,
@@ -1310,7 +1528,8 @@ const S_MAIL_ES: &str = "  ── MAIL (auditoría de postura de correo) ──�
                            BIMI, MTA-STS, TLS-RPT, CAA
 ";
 
-const S_RECON_ES: &str = "  ── LOOKUP, WHOIS Y RECONOCIMIENTO ───────────────────────────────────────
+const S_RECON_ES: &str =
+    "  ── LOOKUP, WHOIS Y RECONOCIMIENTO ───────────────────────────────────────
     lookup, profile, host  Perfil DNS completo: A AAAA CNAME NS MX TXT SOA CAA a la vez
     -L, --lookup           Igual que el subcomando `lookup`
     whois                  WHOIS para un dominio o IP (desde cero, TCP/43)
@@ -1375,7 +1594,8 @@ fn section_body_es(topic: &str) -> Option<&'static str> {
     })
 }
 
-const S_MOST_USED_ES: &str = "  ── MÁS USADO ──────────────────────────────────────────────────────────────
+const S_MOST_USED_ES: &str =
+    "  ── MÁS USADO ──────────────────────────────────────────────────────────────
     -sV                    Identificar el servicio y versión en puertos abiertos
     -OS                    Inferir el SO (solo: un reporte SO enfocado)
     -A / -AA               -sV + -OS + -vuln  /  lo mismo más UDP, MAC, dispositivo
@@ -1392,7 +1612,9 @@ const S_MOST_USED_ES: &str = "  ── MÁS USADO ──────────
 ";
 
 fn topic_index() -> String {
-    let mut s = String::from("  ── MORE HELP ──────────────────────────────────────────────────────────────\n");
+    let mut s = String::from(
+        "  ── MORE HELP ──────────────────────────────────────────────────────────────\n",
+    );
     for (name, desc) in HELP_TOPICS {
         s.push_str(&format!("    kaisen --help {name:<10} {desc}\n"));
     }
@@ -1400,14 +1622,24 @@ fn topic_index() -> String {
 }
 
 fn topic_index_es() -> String {
-    let mut s = String::from("  ── MÁS AYUDA ──────────────────────────────────────────────────────────────\n");
+    let mut s = String::from(
+        "  ── MÁS AYUDA ──────────────────────────────────────────────────────────────\n",
+    );
     s.push_str("    kaisen --ayuda escaneo      tipos de escaneo: TCP connect, SYN, UDP\n");
-    s.push_str("    kaisen --ayuda objetivos    qué escanear, desde un archivo, y qué dejar solo\n");
+    s.push_str(
+        "    kaisen --ayuda objetivos    qué escanear, desde un archivo, y qué dejar solo\n",
+    );
     s.push_str("    kaisen --ayuda puertos      elegir y excluir puertos\n");
-    s.push_str("    kaisen --ayuda detección    -sV, -OS, -MC, -DP, -vuln y los presets agresivos\n");
+    s.push_str(
+        "    kaisen --ayuda detección    -sV, -OS, -MC, -DP, -vuln y los presets agresivos\n",
+    );
     s.push_str("    kaisen --ayuda tiempo       velocidad, concurrencia, retrasos y progreso\n");
-    s.push_str("    kaisen --ayuda salida       formatos, color, verbosidad, filtrado de hallazgos\n");
-    s.push_str("    kaisen --ayuda udp          cómo UDP escanea obtiene una respuesta real sin root\n");
+    s.push_str(
+        "    kaisen --ayuda salida       formatos, color, verbosidad, filtrado de hallazgos\n",
+    );
+    s.push_str(
+        "    kaisen --ayuda udp          cómo UDP escanea obtiene una respuesta real sin root\n",
+    );
     s.push_str("    kaisen --ayuda dns          el reemplazo de dig, incluyendo DNS encriptado\n");
     s.push_str("    kaisen --ayuda servidores   auditoría de servidor de nombres\n");
     s.push_str("    kaisen --ayuda correo       auditoría de postura de correo\n");
@@ -1437,7 +1669,8 @@ fn help_summary_es() -> String {
     )
 }
 
-const S_MOST_USED: &str = "  ── MOST USED ──────────────────────────────────────────────────────────────
+const S_MOST_USED: &str =
+    "  ── MOST USED ──────────────────────────────────────────────────────────────
     -sV                    Identify the service and version on open ports
     -OS                    Infer the OS (alone: a focused OS report)
     -A / -AA               -sV + -OS + -vuln  /  the same plus UDP, MAC, device
@@ -1535,10 +1768,7 @@ pub fn help_text(topic: Option<&str>, spanish: bool) -> String {
                     body,
                     topic_index()
                 ),
-                None => format!(
-                    "kaisen: no help topic called '{t}'.\n\n{}",
-                    topic_index()
-                ),
+                None => format!("kaisen: no help topic called '{t}'.\n\n{}", topic_index()),
             },
         }
     }
