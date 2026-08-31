@@ -106,6 +106,24 @@ aarch64 y macOS Intel/Apple Silicon.
 
 </details>
 
+### ▍Desinstalación y Reinstalación Limpia
+
+Para eliminar completamente cualquier rastro de Kaisen (binarios, alias, artefactos de compilación, archivos temporales y cachés) para una reinstalación limpia:
+
+**Linux / macOS / Termux**
+```sh
+curl -fsSL https://raw.githubusercontent.com/nostraxiten/kaisen/main/delete.sh | sh
+```
+O desde un repositorio clonado localmente:
+```sh
+./delete.sh
+```
+
+**Windows (PowerShell)**
+```powershell
+Remove-Item "$env:USERPROFILE\.cargo\bin\kaisen.exe", "$env:USERPROFILE\.cargo\bin\kai.exe", "$env:USERPROFILE\.cargo\bin\kaison.exe" -ErrorAction SilentlyContinue
+```
+
 ---
 
 ## ▍Empezar

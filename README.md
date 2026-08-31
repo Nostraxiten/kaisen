@@ -1,6 +1,6 @@
 **A port scanner and a DNS toolkit in one binary. No root. No dependencies.**
 
-[Install](#install) · [Quick start](#quick-start) · [Commands](#command-reference) ·
+[Install](#install) · [Uninstall](#uninstall) · [Quick start](#quick-start) · [Commands](#command-reference) ·
 [How it works](#how-a-scan-runs) · [Encrypted DNS](#encrypted-dns) ·
 [Español](README.es.md)
 
@@ -95,6 +95,24 @@ macOS. Release builds are published for Linux x86-64/aarch64 (musl), Android
 aarch64, and macOS Intel/Apple Silicon.
 
 </details>
+
+### ▍Uninstall & Clean Reinstall
+
+To completely remove any trace of Kaisen (binaries, aliases, build artifacts, temporary files, and caches) for a clean reinstall:
+
+**Linux / macOS / Termux**
+```sh
+curl -fsSL https://raw.githubusercontent.com/nostraxiten/kaisen/main/delete.sh | sh
+```
+Or, from a local repository checkout:
+```sh
+./delete.sh
+```
+
+**Windows (PowerShell)**
+```powershell
+Remove-Item "$env:USERPROFILE\.cargo\bin\kaisen.exe", "$env:USERPROFILE\.cargo\bin\kai.exe", "$env:USERPROFILE\.cargo\bin\kaison.exe" -ErrorAction SilentlyContinue
+```
 
 ---
 
