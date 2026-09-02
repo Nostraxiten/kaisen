@@ -1247,9 +1247,7 @@ fn svcb_param(key: u16, value: &[u8]) -> String {
     match key {
         0 => {
             let keys: Vec<String> = value
-                .as_chunks::<2>()
-                .0
-                .iter()
+                .chunks_exact(2)
                 .map(|c| ((c[0] as u16) << 8 | c[1] as u16).to_string())
                 .collect();
             format!("mandatory={}", keys.join(","))
@@ -1279,9 +1277,7 @@ fn svcb_param(key: u16, value: &[u8]) -> String {
         ),
         4 => {
             let ips: Vec<String> = value
-                .as_chunks::<4>()
-                .0
-                .iter()
+                .chunks_exact(4)
                 .map(|c| Ipv4Addr::new(c[0], c[1], c[2], c[3]).to_string())
                 .collect();
             format!("ipv4hint={}", ips.join(","))
@@ -1289,10 +1285,8 @@ fn svcb_param(key: u16, value: &[u8]) -> String {
         5 => format!("ech={} bytes", value.len()),
         6 => {
             let ips: Vec<String> = value
-                .as_chunks::<16>()
-                .0
-                .iter()
-                .map(|c| Ipv6Addr::from(*c).to_string())
+                .chunks_exact(16)
+                .map(|c| Ipv6Addr::from(<[u8; 16]>::try_from(c).unwrap()).to_string())
                 .collect();
             format!("ipv6hint={}", ips.join(","))
         }
@@ -1338,126 +1332,131 @@ pub async fn query_opts(
     qtype: u16,
     o: &QueryOpts,
 ) -> Result<Response, String> {
-    let (force_tcp, timeout_ms) = (o.force_tcp, o.timeout_ms);
-    let needs_edns = o.dnssec || o.nsid || o.client_subnet.is_some() || o.udp_size > 0;
-    let id = rand_id();
-    let packet = build_query_opts(id, name, qtype, o);
     let start = std::time::Instant::now();
-    let dur = Duration::from_millis(timeout_ms.max(500));
+    let mut plain_opts: Option<QueryOpts> = None;
 
-    if !force_tcp {
-        let bind: SocketAddr = if server.is_ipv6() {
-            "[::]:0".parse().unwrap()
-        } else {
-            "0.0.0.0:0".parse().unwrap()
-        };
-        let sock = UdpSocket::bind(bind).await.map_err(|e| e.to_string())?;
-        sock.connect(server).await.map_err(|e| e.to_string())?;
+    loop {
+        let cur = plain_opts.as_ref().unwrap_or(o);
+        let (force_tcp, timeout_ms) = (cur.force_tcp, cur.timeout_ms);
+        let needs_edns = cur.dnssec || cur.nsid || cur.client_subnet.is_some() || cur.udp_size > 0;
+        let packet = build_query_opts(rand_id(), name, qtype, cur);
+        let dur = Duration::from_millis(timeout_ms.max(500));
 
-        // UDP is lossy — especially over mobile links and against rate-limited
-        // public resolvers under bursts. Retransmit up to 3 times on timeout
-        // before giving up on UDP (a per-attempt window keeps latency bounded).
-        let per_try = Duration::from_millis((dur.as_millis() as u64 / 2).max(700));
-        let mut buf = vec![0u8; 4096];
-        let mut received: Option<usize> = None;
-        for _ in 0..3 {
-            if sock.send(&packet).await.is_err() {
-                break;
-            }
-            match timeout(per_try, sock.recv(&mut buf)).await {
-                Ok(Ok(n)) => {
-                    received = Some(n);
+        if !force_tcp {
+            let bind: SocketAddr = if server.is_ipv6() {
+                "[::]:0".parse().unwrap()
+            } else {
+                "0.0.0.0:0".parse().unwrap()
+            };
+            let sock = UdpSocket::bind(bind).await.map_err(|e| e.to_string())?;
+            sock.connect(server).await.map_err(|e| e.to_string())?;
+
+            // UDP is lossy — especially over mobile links and against rate-limited
+            // public resolvers under bursts. Retransmit up to 3 times on timeout
+            // before giving up on UDP (a per-attempt window keeps latency bounded).
+            let per_try = Duration::from_millis((dur.as_millis() as u64 / 2).max(700));
+            let mut buf = vec![0u8; 4096];
+            let mut received: Option<usize> = None;
+            for _ in 0..3 {
+                if sock.send(&packet).await.is_err() {
                     break;
                 }
-                Ok(Err(e)) => return Err(e.to_string()),
-                Err(_) => continue, // timed out — retransmit
+                match timeout(per_try, sock.recv(&mut buf)).await {
+                    Ok(Ok(n)) => {
+                        received = Some(n);
+                        break;
+                    }
+                    Ok(Err(e)) => return Err(e.to_string()),
+                    Err(_) => continue, // timed out — retransmit
+                }
             }
+
+            if let Some(n) = received {
+                let msg = &buf[..n];
+                // A server too old for EDNS0 answers FORMERR or NOTIMP to the OPT
+                // record rather than to the question. Retry once without it before
+                // concluding the name does not resolve.
+                let rcode_early = if n >= 4 { msg[3] & 0x0f } else { 0 };
+                if (rcode_early == 1 || rcode_early == 4) && needs_edns {
+                    let plain = QueryOpts {
+                        udp_size: 0,
+                        dnssec: false,
+                        nsid: false,
+                        client_subnet: None,
+                        ..*cur
+                    };
+                    plain_opts = Some(plain);
+                    continue;
+                }
+                // Check TC (truncation) bit.
+                let tc = n >= 4 && (msg[2] & 0x02) != 0;
+                if !tc {
+                    let (rcode, answers, authorities, additionals) = parse_response(msg)?;
+                    let (aa, tc_flag, ra, ad) = header_flags(msg);
+                    let nsid = extract_nsid(&additionals);
+                    let ecs_scope = extract_ecs_scope(&additionals);
+                    return Ok(Response {
+                        rcode,
+                        answers,
+                        authorities,
+                        additionals,
+                        elapsed_ms: start.elapsed().as_millis(),
+                        server,
+                        via_tcp: false,
+                        aa,
+                        ad,
+                        ra,
+                        tc: tc_flag,
+                        nsid,
+                        ecs_scope,
+                    });
+                }
+                // truncated -> fall through to TCP
+            }
+            // If every UDP attempt timed out, fall through to a TCP retry below.
         }
 
-        if let Some(n) = received {
-            let msg = &buf[..n];
-            // A server too old for EDNS0 answers FORMERR or NOTIMP to the OPT
-            // record rather than to the question. Retry once without it before
-            // concluding the name does not resolve.
-            let rcode_early = if n >= 4 { msg[3] & 0x0f } else { 0 };
-            if (rcode_early == 1 || rcode_early == 4) && needs_edns {
-                let plain = QueryOpts {
-                    udp_size: 0,
-                    dnssec: false,
-                    nsid: false,
-                    client_subnet: None,
-                    ..*o
-                };
-                return Box::pin(query_opts(server, name, qtype, &plain)).await;
-            }
-            // Check TC (truncation) bit.
-            let tc = n >= 4 && (msg[2] & 0x02) != 0;
-            if !tc {
-                let (rcode, answers, authorities, additionals) = parse_response(msg)?;
-                let (aa, tc_flag, ra, ad) = header_flags(msg);
-                let nsid = extract_nsid(&additionals);
-                let ecs_scope = extract_ecs_scope(&additionals);
-                return Ok(Response {
-                    rcode,
-                    answers,
-                    authorities,
-                    additionals,
-                    elapsed_ms: start.elapsed().as_millis(),
-                    server,
-                    via_tcp: false,
-                    aa,
-                    ad,
-                    ra,
-                    tc: tc_flag,
-                    nsid,
-                    ecs_scope,
-                });
-            }
-            // truncated -> fall through to TCP
-        }
-        // If every UDP attempt timed out, fall through to a TCP retry below.
+        // TCP path (length-prefixed).
+        let mut stream = timeout(dur, TcpStream::connect(server))
+            .await
+            .map_err(|_| "TCP connect timed out".to_string())?
+            .map_err(|e| e.to_string())?;
+        let len = (packet.len() as u16).to_be_bytes();
+        stream.write_all(&len).await.map_err(|e| e.to_string())?;
+        stream.write_all(&packet).await.map_err(|e| e.to_string())?;
+
+        let mut lenbuf = [0u8; 2];
+        timeout(dur, stream.read_exact(&mut lenbuf))
+            .await
+            .map_err(|_| "TCP read timed out".to_string())?
+            .map_err(|e| e.to_string())?;
+        let rlen = u16::from_be_bytes(lenbuf) as usize;
+        let mut msg = vec![0u8; rlen];
+        timeout(dur, stream.read_exact(&mut msg))
+            .await
+            .map_err(|_| "TCP read timed out".to_string())?
+            .map_err(|e| e.to_string())?;
+
+        let (rcode, answers, authorities, additionals) = parse_response(&msg)?;
+        let ecs_scope = extract_ecs_scope(&additionals);
+        let (aa, tc_flag, ra, ad) = header_flags(&msg);
+        let nsid = extract_nsid(&additionals);
+        return Ok(Response {
+            rcode,
+            answers,
+            authorities,
+            additionals,
+            elapsed_ms: start.elapsed().as_millis(),
+            server,
+            via_tcp: true,
+            aa,
+            ad,
+            ra,
+            tc: tc_flag,
+            nsid,
+            ecs_scope,
+        });
     }
-
-    // TCP path (length-prefixed).
-    let mut stream = timeout(dur, TcpStream::connect(server))
-        .await
-        .map_err(|_| "TCP connect timed out".to_string())?
-        .map_err(|e| e.to_string())?;
-    let len = (packet.len() as u16).to_be_bytes();
-    stream.write_all(&len).await.map_err(|e| e.to_string())?;
-    stream.write_all(&packet).await.map_err(|e| e.to_string())?;
-
-    let mut lenbuf = [0u8; 2];
-    timeout(dur, stream.read_exact(&mut lenbuf))
-        .await
-        .map_err(|_| "TCP read timed out".to_string())?
-        .map_err(|e| e.to_string())?;
-    let rlen = u16::from_be_bytes(lenbuf) as usize;
-    let mut msg = vec![0u8; rlen];
-    timeout(dur, stream.read_exact(&mut msg))
-        .await
-        .map_err(|_| "TCP read timed out".to_string())?
-        .map_err(|e| e.to_string())?;
-
-    let (rcode, answers, authorities, additionals) = parse_response(&msg)?;
-    let ecs_scope = extract_ecs_scope(&additionals);
-    let (aa, tc_flag, ra, ad) = header_flags(&msg);
-    let nsid = extract_nsid(&additionals);
-    Ok(Response {
-        rcode,
-        answers,
-        authorities,
-        additionals,
-        elapsed_ms: start.elapsed().as_millis(),
-        server,
-        via_tcp: true,
-        aa,
-        ad,
-        ra,
-        tc: tc_flag,
-        nsid,
-        ecs_scope,
-    })
 }
 
 // ── encrypted transports ───────────────────────────────────────────────────
