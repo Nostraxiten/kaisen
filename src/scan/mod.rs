@@ -2824,9 +2824,7 @@ mod tests {
     #[test]
     fn unhandled_connect_errors_fall_to_filtered() {
         let kinds = [
-            ErrorKind::HostUnreachable,
-            ErrorKind::NetworkUnreachable,
-            ErrorKind::NetworkDown,
+            ErrorKind::NotConnected,
             ErrorKind::ConnectionReset,
             ErrorKind::ConnectionAborted,
             ErrorKind::PermissionDenied,
