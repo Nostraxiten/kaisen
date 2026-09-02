@@ -18,8 +18,11 @@ jobs:
       - name: Formato (cargo fmt)
         run: cargo fmt --check
 
-      - name: Build
+      - name: Build (debug)
         run: cargo build --verbose
+
+      - name: Build (release profile)
+        run: cargo build --release --verbose
 
       - name: Tests
         run: cargo test --verbose

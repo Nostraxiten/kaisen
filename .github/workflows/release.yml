@@ -20,18 +20,23 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             name: kaisen-linux-x86_64
+            use_cross: false
           - os: ubuntu-latest
             target: aarch64-unknown-linux-musl
             name: kaisen-linux-aarch64
+            use_cross: false
           - os: ubuntu-latest
             target: aarch64-linux-android
             name: kaisen-android-aarch64
+            use_cross: true
           - os: macos-latest
             target: x86_64-apple-darwin
             name: kaisen-macos-x86_64
+            use_cross: false
           - os: macos-latest
             target: aarch64-apple-darwin
             name: kaisen-macos-aarch64
+            use_cross: false
     steps:
       - uses: actions/checkout@v4
 
@@ -40,31 +45,54 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      - name: Install cross-compilation helper
-        if: runner.os == 'Linux'
-        run: cargo install cross --locked || true
+      # Cache ~/.cargo/registry + target/ so re-releases and re-runs skip
+      # re-downloading and re-compiling unchanged dependencies.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
 
-      - name: Build (native)
-        if: runner.os == 'macOS'
-        run: cargo build --release --target ${{ matrix.target }}
+      # Install musl-tools for the musl Linux targets (provides musl-gcc).
+      - name: Install musl tools (Linux musl targets)
+        if: runner.os == 'Linux' && !matrix.use_cross
+        run: sudo apt-get install -y musl-tools
 
-      - name: Build (cross)
-        if: runner.os == 'Linux'
-        run: |
-          if command -v cross >/dev/null 2>&1; then
-            cross build --release --target ${{ matrix.target }}
-          else
-            rustup target add ${{ matrix.target }}
-            cargo build --release --target ${{ matrix.target }}
-          fi
+      # Install cross for the Android target. cross uses Docker (available on
+      # ubuntu-latest by default) to provide the full Android NDK toolchain
+      # in a pre-built container — no manual NDK installation required.
+      - name: Install cross (Android target)
+        if: matrix.use_cross
+        run: cargo install cross --locked
+
+      - name: Build (native / musl)
+        if: "!matrix.use_cross"
+        run: cargo build --profile release-lto --target ${{ matrix.target }}
+
+      - name: Build (cross — Android)
+        if: matrix.use_cross
+        # CROSS_CONTAINER_OPTS is set so cross picks up the correct Docker
+        # socket on GitHub Actions runners.
+        env:
+          CROSS_CONTAINER_OPTS: "--user root"
+        run: cross build --profile release-lto --target ${{ matrix.target }}
 
       - name: Package
         shell: bash
         run: |
-          BIN=target/${{ matrix.target }}/release/kaisen
+          BIN=target/${{ matrix.target }}/release-lto/kaisen
           mkdir -p dist
           cp "$BIN" "dist/${{ matrix.name }}"
           ( cd dist && tar -czf "${{ matrix.name }}.tar.gz" "${{ matrix.name }}" )
+
+      # Catch empty or missing binaries before they pollute a release.
+      - name: Verify binary
+        shell: bash
+        run: |
+          BIN=dist/${{ matrix.name }}
+          if [ ! -f "$BIN" ] || [ ! -s "$BIN" ]; then
+            echo "ERROR: binary '$BIN' is missing or empty" >&2
+            exit 1
+          fi
+          echo "OK: $(ls -lh "$BIN")"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

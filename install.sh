@@ -11,6 +11,8 @@
 # Environment variables:
 #   KAISEN_BRANCH       – branch/tag to clone when building from source (default: main)
 #   KAISEN_FROM_SOURCE  – set to 1 to skip the prebuilt check and always build
+#   KAISEN_JOBS         – parallel cargo jobs when building from source (default: 2 on Termux,
+#                         unlimited on other platforms). Example: KAISEN_JOBS=4 sh install.sh
 #
 #   curl -fsSL https://raw.githubusercontent.com/nostraxiten/kaisen/main/install.sh | sh
 #   # or, from a clone:
@@ -155,7 +157,10 @@ ensure_rust() {
     fi
     info "Rust toolchain not found — installing..."
     if [ "$IS_TERMUX" -eq 1 ]; then
-        pkg install -y rust git || { err "pkg install failed"; exit 1; }
+        # Install only what is missing to avoid reinstalling an already-present
+        # package (each pkg install check costs a few seconds on slow connections).
+        have cargo || pkg install -y rust || { err "pkg install rust failed"; exit 1; }
+        have git   || pkg install -y git  || { err "pkg install git failed";  exit 1; }
     elif have apt-get; then
         (sudo -n true 2>/dev/null && SUDO=sudo || SUDO="")
         if have sudo; then SUDO=sudo; else SUDO=""; fi
@@ -207,8 +212,19 @@ build_from_source() {
     # -------------------------------------------------------------------------
     # 5. Build
     # -------------------------------------------------------------------------
+    # On Termux, cap parallelism at 2 by default: compiling with all cores on a
+    # device with ≤3 GB RAM causes OOM-kills from rustc's heavy memory use.
+    # Users can override: KAISEN_JOBS=4 sh install.sh
+    if [ "$IS_TERMUX" -eq 1 ] && [ -z "${KAISEN_JOBS:-}" ]; then
+        KAISEN_JOBS=2
+        info "Termux: building with -j${KAISEN_JOBS} to avoid OOM (override with KAISEN_JOBS=N)"
+    fi
+    JOBS_FLAG=""
+    [ -n "${KAISEN_JOBS:-}" ] && JOBS_FLAG="-j${KAISEN_JOBS}"
+
     info "No prebuilt binary available, building from source (this can take a few minutes)..."
-    ( cd "$SRC_DIR" && cargo build --release )
+    # shellcheck disable=SC2086   # JOBS_FLAG intentionally word-splits
+    ( cd "$SRC_DIR" && cargo build --release $JOBS_FLAG )
     BIN="$SRC_DIR/target/release/kaisen"
     [ -x "$BIN" ] || { err "build did not produce $BIN"; exit 1; }
 }

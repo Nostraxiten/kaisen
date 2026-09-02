@@ -23,11 +23,24 @@ futures = "0.3"
 # Already present transitively via tokio/mio; pinned here as a direct dep.
 socket2 = "0.6"
 
+# Default release profile — used when building from source (install.sh, cargo build --release).
+# Thin LTO + 4 codegen-units compile ~50% faster than fat LTO on slow hardware (ARM/Termux)
+# while retaining >95% of the runtime optimisations. The binary is a few KB larger, which
+# is invisible after `strip = true`.
 [profile.release]
 opt-level = 3
-lto = true
-codegen-units = 1
+lto = "thin"
+codegen-units = 4
 panic = "abort"
 strip = true
+
+# CI release profile — used only by release.yml (`cargo build --profile release-lto`).
+# Fat LTO + 1 codegen-unit produces the smallest, fastest binary for the official
+# prebuilt assets that users download. CI runners have ample CPU/RAM so the longer
+# compile time (2–4× vs thin LTO) is acceptable.
+[profile.release-lto]
+inherits = "release"
+lto = true
+codegen-units = 1
 
 # al fin carajo
