@@ -1139,7 +1139,7 @@ fn parse_ssdp(data: &[u8]) -> Probed {
         let lower = line.to_ascii_lowercase();
         if let Some(v) = lower.strip_prefix("server:") {
             let server = line[line.len() - v.len()..].trim().to_string();
-            p.product = server.clone();
+            p.product.clone_from(&server);
             // "Linux/3.14 UPnP/1.0 Sonos/57.6" — the last token is the product.
             if let Some(last) = server.split_whitespace().last() {
                 if let Some((prod, ver)) = last.split_once('/') {
@@ -1147,7 +1147,7 @@ fn parse_ssdp(data: &[u8]) -> Probed {
                     p.version = ver.to_string();
                 }
             }
-            p.os_hint = server.clone();
+            p.os_hint.clone_from(&server);
             p.banner = server;
         } else if lower.starts_with("st:") || lower.starts_with("nt:") {
             bits.push(
