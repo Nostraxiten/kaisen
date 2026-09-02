@@ -7,6 +7,7 @@
 //!     on Linux/Kali/Termux/macOS). Initial TTL reveals the OS family.
 //!   * SNMP sysDescr (UDP/161, community "public") — the exact OS string when
 //!     the device exposes SNMP.
+//!
 //! Banner-based hints (SSH/HTTP/FTP-SYST/SMTP) are collected in `service.rs`.
 
 use std::net::IpAddr;

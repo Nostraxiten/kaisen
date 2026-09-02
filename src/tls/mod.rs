@@ -495,10 +495,10 @@ fn parse_certificates(body: &[u8], info: &mut TlsInfo) {
     // Within a certificate the issuer RDN precedes the subject RDN, so the
     // first CN we meet is the issuer's and the last is the subject's.
     if let Some(first) = cns.first() {
-        info.issuer_cn = first.clone();
+        info.issuer_cn.clone_from(first);
     }
     if let Some(last) = cns.last() {
-        info.subject_cn = last.clone();
+        info.subject_cn.clone_from(last);
     }
     info.self_signed = !cns.is_empty() && info.issuer_cn == info.subject_cn;
 
@@ -507,7 +507,7 @@ fn parse_certificates(body: &[u8], info: &mut TlsInfo) {
     // as the CN: the subject's O is the last one in the certificate.
     let orgs = der_organizations(cert);
     if let Some(last) = orgs.last() {
-        info.subject_o = last.clone();
+        info.subject_o.clone_from(last);
     }
 
     info.sans = der_dns_sans(cert);

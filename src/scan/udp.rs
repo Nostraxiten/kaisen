@@ -801,10 +801,10 @@ fn parse_ntp(data: &[u8]) -> Probed {
                         .to_string();
                     p.version = crate::service::probe::first_version(&v);
                     if p.version.is_empty() {
-                        p.version = v.clone();
+                        p.version.clone_from(&v);
                     }
                 } else if key == "system" {
-                    p.os_hint = v.clone();
+                    p.os_hint.clone_from(&v);
                     bits.push(v);
                 } else {
                     bits.push(format!("{key}={v}"));
@@ -891,8 +891,8 @@ fn parse_snmp(data: &[u8]) -> Probed {
                 let descr = clean(&String::from_utf8_lossy(&data[start..start + len]), 140);
                 if !descr.is_empty() {
                     p.product = "SNMP agent".into();
-                    p.extra = descr.clone();
-                    p.banner = descr.clone();
+                    p.extra.clone_from(&descr);
+                    p.banner.clone_from(&descr);
                     p.version = crate::service::probe::first_version(&descr);
                     p.os_hint = descr;
                     return p;
@@ -960,9 +960,9 @@ fn parse_netbios(data: &[u8]) -> Probed {
         let flags = ((data[a + 16] as u16) << 8) | data[a + 17] as u16;
         let group = flags & 0x8000 != 0;
         if group && workgroup.is_empty() {
-            workgroup = raw.clone();
+            workgroup.clone_from(&raw);
         } else if !group && hostname.is_empty() && suffix == 0x00 {
-            hostname = raw.clone();
+            hostname.clone_from(&raw);
         }
         let role = match suffix {
             0x00 => "workstation",

@@ -2400,7 +2400,7 @@ pub fn parse_port_specs(spec: &str) -> Result<Vec<PortSpec>, String> {
                 c == '(' || c == ')' || c == '[' || c == ']' || c == '{' || c == '}'
             });
             let vers: Vec<String> = v
-                .split(|c| c == ',' || c == '|' || c == '+' || c == '/' || c == ';')
+                .split([' ', ',', '|', '+', '/', ';'])
                 .map(|s| s.trim().to_string())
                 .filter(|s| !s.is_empty())
                 .collect();

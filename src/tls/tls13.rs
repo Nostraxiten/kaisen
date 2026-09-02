@@ -850,6 +850,7 @@ fn aes128_expand(key: &[u8; 16]) -> [[u8; 16]; 11] {
         for i in 0..4 {
             w[r][i] = prev[i] ^ t[i];
         }
+        #[allow(clippy::needless_range_loop)]
         for i in 4..16 {
             w[r][i] = prev[i] ^ w[r][i - 4];
         }

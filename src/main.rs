@@ -9,12 +9,10 @@
     clippy::format_in_format_args,
     clippy::redundant_locals,
     clippy::manual_clamp,
-    clippy::manual_pattern_char_comparison,
     clippy::question_mark,
     clippy::collapsible_match,
     clippy::if_same_then_else,
-    clippy::single_element_loop,
-    clippy::doc_lazy_continuation
+    clippy::single_element_loop
 )]
 
 mod cli;

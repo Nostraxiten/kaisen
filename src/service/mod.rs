@@ -468,25 +468,25 @@ fn apply_probed(p: &probe::Probed, info: &mut ServiceInfo) {
         info.name = p.name.to_string();
     }
     if !p.product.is_empty() {
-        info.product = p.product.clone();
+        info.product.clone_from(&p.product);
     }
     if !p.version.is_empty() {
-        info.version = p.version.clone();
+        info.version.clone_from(&p.version);
     }
     if !p.extra.is_empty() {
-        info.extra = p.extra.clone();
+        info.extra.clone_from(&p.extra);
     }
     if !p.banner.is_empty() {
-        info.banner = p.banner.clone();
+        info.banner.clone_from(&p.banner);
     }
     if !p.os_hint.is_empty() && info.os_hint.is_empty() {
-        info.os_hint = p.os_hint.clone();
+        info.os_hint.clone_from(&p.os_hint);
     }
     detect_os_from_text(&format!("{} {} {}", p.product, p.extra, p.banner), info);
 }
 
 fn apply_tls(port: u16, t: &tls::TlsInfo, info: &mut ServiceInfo) {
-    info.tls_version = t.version.clone();
+    info.tls_version.clone_from(&t.version);
     info.cert_expired = t.expired;
     info.self_signed = t.self_signed;
     info.name = tls_service_name(port, &t.alpn).to_string();
@@ -1001,7 +1001,7 @@ fn parse_banner(port: u16, data: &[u8], info: &mut ServiceInfo) {
     }
 
     // IRC: the 004 numeric names the daemon and its version.
-    if text.contains(" 004 ") || text.starts_with(":") && text.contains("NOTICE AUTH") {
+    if text.contains(" 004 ") || text.starts_with(':') && text.contains("NOTICE AUTH") {
         info.name = "irc".into();
         for line in text.lines() {
             if let Some(pos) = line.find(" 004 ") {

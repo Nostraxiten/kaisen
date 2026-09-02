@@ -1100,7 +1100,12 @@ fn parse_response(msg: &[u8]) -> Result<(u8, Vec<Record>, Vec<Record>, Vec<Recor
 // ── naming and formatting helpers for the richer record types ──────────────
 
 fn hex(bytes: &[u8]) -> String {
-    bytes.iter().map(|b| format!("{b:02x}")).collect()
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        use std::fmt::Write;
+        let _ = write!(&mut out, "{b:02x}");
+    }
+    out
 }
 
 /// base32hex with no padding — the encoding NSEC3 uses for hashed names.

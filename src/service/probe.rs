@@ -934,7 +934,7 @@ pub async fn dns_version(stream: &mut TcpStream, dur: Duration) -> Option<Probed
     let text = String::from_utf8_lossy(&body[start..start + txt_len])
         .trim()
         .to_string();
-    p.banner = text.clone();
+    p.banner.clone_from(&text);
     let lower = text.to_ascii_lowercase();
     let product = if lower.contains("dnsmasq") {
         "dnsmasq"
@@ -1636,7 +1636,7 @@ pub async fn git_daemon(stream: &mut TcpStream, dur: Duration) -> Option<Probed>
 /// First token in `s` that looks like a dotted version number.
 pub fn first_version(s: &str) -> String {
     for tok in s.split(|c: char| c.is_whitespace() || "(),;:[]<>\"'".contains(c)) {
-        let t = tok.trim_end_matches(|c: char| c == '.' || c == ',');
+        let t = tok.trim_end_matches(['.', ',']);
         if looks_like_version(t) {
             return t.to_string();
         }
