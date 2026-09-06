@@ -1,3 +1,6 @@
+**WARNING. This tool offers more support for versions and CVEs, and is faster at scanning ports than Nmap. It even has DNSUtils options, but please do not use it professionally, NMAP AND ANY OTHER TOOL IS BETTER THAN THIS.**
+
+
 **A port scanner and a DNS toolkit in one binary. No root. No dependencies.**
 
 [Install](#install) · [Uninstall](#uninstall) · [Quick start](#quick-start) · [Commands](#command-reference) ·
