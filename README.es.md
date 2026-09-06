@@ -1,3 +1,6 @@
+**ADVERTENCIA. Esta herramienta ofrece mayor compatibilidad con versiones y vulnerabilidades CVE, y escanea puertos más rápido que Nmap.Incluso tiene opciones de DNSUtils, pero por favor no lo use profesionalmente, NMAP Y CUALQUIER OTRA HERRAMIENTA SON MEJORES QUE ESTO.**
+
+
 **Un escáner de puertos y un juego de herramientas DNS en un solo binario. Sin root. Sin dependencias.**
 
 [Instalación](#instalación) · [Empezar](#empezar) · [Comandos](#referencia-de-comandos) ·
